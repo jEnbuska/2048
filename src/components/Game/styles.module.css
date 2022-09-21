@@ -5,12 +5,16 @@
   min-width: 320px;
   min-height: 100vh;
   width: 100vw;
-  background-color: #f9f8ee;
+  background-color: #f9f8ee;;
+}
+
+.game, .game * {
+  user-select: none !important;
 }
 
 @supports (min-height: 100svh) {
   .game {
-    min-height: 100svh;
+    min-height: 100 svh;
   }
 }
 
