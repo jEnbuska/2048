@@ -1,9 +1,11 @@
 import { isEqual } from "lodash";
 import { useEffect, useState } from "react";
+import { useSwipeable } from "react-swipeable";
 import useDocumentEventListener from "../../hooks/useDocumentEventListener";
-import { Cell } from "../../types";
+import { Cell, Coordinate } from "../../types";
 import addNewCell from "../../utils/addNewCell";
-import getVectorByKey from "../../utils/getVectorByKey";
+import getTiltDirectionByKey from "../../utils/getTiltDirectionByKey";
+import getVectorByTiltDirection from "../../utils/getVectorByTiltDirection";
 
 import tilt from "../../utils/tilt";
 import Grid from "../Grid/Grid";
@@ -14,30 +16,42 @@ const Game = () => {
     const initialCells = addNewCell([]);
     return addNewCell(initialCells);
   });
+  const updateStateByVector = (vector: Coordinate<-1 | 0 | 1>) => {
+    setCells((prevState) => {
+      prevState = prevState.filter((cell) => !cell.consumedBy);
+      try {
+        const nextState = tilt(vector, prevState);
+        if (isEqual(nextState, prevState)) {
+          return prevState;
+        }
+        return addNewCell(nextState);
+      } catch (e: any) {
+        return prevState;
+      }
+    });
+  };
   useDocumentEventListener(
     {
       type: "keydown",
       listener: (e) => {
-        const vector = getVectorByKey(e.key);
-        if (!vector) return;
-        setCells((prevState) => {
-          prevState = prevState.filter((cell) => !cell.consumedBy);
-          try {
-            const nextState = tilt(vector, prevState);
-            if (isEqual(nextState, prevState)) {
-              return prevState;
-            }
-            return addNewCell(nextState);
-          } catch (e: any) {
-            return prevState;
-          }
-        });
+        const direction = getTiltDirectionByKey(e.key);
+        if (!direction) return;
+        const vector = getVectorByTiltDirection(direction);
+        updateStateByVector(vector);
       },
     },
     []
   );
+  const handlers = useSwipeable({
+    onSwiped: ({ dir }) => {
+      const vector = getVectorByTiltDirection(dir);
+      updateStateByVector(vector);
+    },
+    delta: 20,
+  });
+
   return (
-    <div className={styles.game}>
+    <div className={styles.game} {...handlers}>
       <Grid cells={cells.slice().sort((a, b) => a.id - b.id)} />
     </div>
   );
