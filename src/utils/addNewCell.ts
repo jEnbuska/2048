@@ -8,6 +8,7 @@ const coordinates: Coordinate[] = range(0, GRID_SIZE).flatMap((y) =>
 );
 let ids = 100;
 
+/** add a new cell with random free coordinate inside the grid */
 export default function addNewCell(cells: Cell[]): Cell[] {
   const emptyCoordinates = coordinates.filter(({ x, y }) =>
     cells.every((cell) => cell.x !== x || cell.y !== y)

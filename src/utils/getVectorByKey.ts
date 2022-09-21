@@ -1,5 +1,4 @@
-import { isUndefined } from "lodash";
-import { ArrowKey, Coordinate } from "../types";
+import { Coordinate } from "../types";
 
 export default function getVectorByKey(
   key: string

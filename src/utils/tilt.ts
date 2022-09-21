@@ -2,7 +2,6 @@ import { Cell, Coordinate } from "../types";
 import clearSlack from "./clearSlack";
 import compareFromVector from "./compareFromVector";
 import consumeNeighbour from "./consumeNeighbour";
-import getNonConsumedCell from "./getNonConsumedCell";
 
 export default function tilt(
   vector: Coordinate<-1 | 0 | 1>,

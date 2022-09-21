@@ -1,6 +1,6 @@
 import classnames from "classnames";
 import { range } from "lodash";
-import React, { useContext } from "react";
+import React from "react";
 import styles from "./styles.module.css";
 
 type OwnProps = {

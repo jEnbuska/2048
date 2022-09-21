@@ -3,6 +3,7 @@ import addCoordinates from "./addCoordinates";
 import { GRID_SIZE } from "./constants";
 import getNonConsumedCell from "./getNonConsumedCell";
 
+/** moves the given */
 export default function clearSlack(arg: {
   cell: Cell;
   vector: Coordinate<-1 | 0 | 1>;

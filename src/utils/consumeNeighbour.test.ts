@@ -48,3 +48,21 @@ describe("try to consume neighbour when not possible", () => {
     expect(result).toStrictEqual(expected);
   });
 });
+
+describe("consume neighbour when it's possible", () => {
+  test("try to consume neighbour when next to wall", () => {
+    const result = consumeNeighbour({
+      vector: { x: 0, y: -1 },
+      cells: [
+        { x: 0, y: 0, value: 2, id: 1 },
+        { x: 0, y: 1, value: 2, id: 2 },
+      ],
+      cell: { x: 0, y: 1, value: 2, id: 2 },
+    });
+    const expected = [
+      { x: 0, y: 0, value: 2, id: 1, consumedBy: 2 },
+      { x: 0, y: 0, value: 4, id: 2 },
+    ];
+    expect(result).toStrictEqual(expected);
+  });
+});
