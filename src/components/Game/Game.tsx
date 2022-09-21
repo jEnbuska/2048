@@ -43,6 +43,7 @@ const Game = () => {
     []
   );
   const handlers = useSwipeable({
+    preventScrollOnSwipe: true,
     onSwiped: ({ dir }) => {
       const vector = getVectorByTiltDirection(dir);
       updateStateByVector(vector);
