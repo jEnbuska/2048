@@ -1,0 +1,105 @@
+.cell {
+  width: var(--cell-size);
+  height: var(--cell-size);
+  position: absolute;
+  border-radius: var(--gap-s);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: bold;
+  z-index: 1;
+  --cell-transition-speed: .2s;
+  transition: var(--cell-transition-speed);
+  overflow: hidden;
+  color: var(--cell-text-color);
+  background-color: var(--cell-background-color);
+  animation: scale-appear var(--cell-transition-speed) forwards;
+  animation-delay: calc(var(--cell-transition-speed) / 2);
+  scale: 0;
+  --cell-font-size-s: min(45px, 10vw);
+  --cell-font-size-m: min(50px, 10vw);
+  --cell-font-size-l: min(55px, 10vw);
+  --cell-font-size-xl: min(65px, 10vw);
+  font-size: var(--cell-font-size, var(--cell-font-size-s));
+}
+
+@keyframes scale-appear {
+  0% {
+    scale: 0;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+
+.cell-2 {
+  --cell-background-color: #eee4da;
+  --cell-text-color: #786e65;
+  --cell-font-size: var(--cell-font-size-xl);
+}
+
+.cell-4 {
+  --cell-background-color: #ede0c9;
+  --cell-text-color: #786e65;
+  --cell-font-size: var(--cell-font-size-xl);
+}
+
+.cell-8 {
+  --cell-background-color: #f1b17a;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-xl);
+}
+
+.cell-16 {
+  --cell-background-color: #f49463;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-l);
+}
+
+.cell-32 {
+  --cell-background-color: #f67b5e;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-l);
+}
+
+.cell-64 {
+  --cell-background-color: #f57c5f;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-l);
+}
+
+.cell-128 {
+  --cell-background-color: #eccf72;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-m);
+}
+
+.cell-256 {
+  --cell-background-color: #eccc5f;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-m);
+}
+
+.cell-512 {
+  --cell-background-color: #e8c04d;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-m);
+}
+
+.cell-1024 {
+  --cell-background-color: #ecc43f;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-s);
+}
+
+.cell-2048 {
+  --cell-background-color: #e6be3d;
+  --cell-text-color: #f8f6f2;
+  --cell-font-size: var(--cell-font-size-s);
+}
+
+.cellConsumed {
+  z-index: 0;
+}
+

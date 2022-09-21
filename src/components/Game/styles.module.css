@@ -1,0 +1,16 @@
+.game {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 320px;
+  min-height: 100vh;
+  width: 100vw;
+  background-color: #f9f8ee;
+}
+
+@supports (min-height: 100svh) {
+  .game {
+    min-height: 100svh;
+  }
+}
+

@@ -1,0 +1,15 @@
+.grid {
+  display: grid;
+  position: relative;
+  grid-template-columns: repeat(4, minmax(min(20vw, 130px), 1fr));
+  grid-template-rows: repeat(4, minmax(min(20vw, 130px), 1fr));
+  grid-gap: var(--gap-s);
+  padding: var(--gap-s);
+  background: #baada0;
+  border-radius: var(--gap-s);
+  --cell-size: min(20vw, 130px);
+}
+.cell {
+  background: #d6cdc4;
+  border-radius: var(--gap-s);
+}

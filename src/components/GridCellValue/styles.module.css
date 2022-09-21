@@ -1,0 +1,24 @@
+
+.value {
+  position: absolute;
+  transition: var(--cell-transition-speed);
+  height: var(--cell-size);
+  width: var(--cell-size);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: transparent;
+}
+
+.valueActive {
+  color: var(--cell-text-color);
+  scale: 1;
+}
+
+.valueSmaller {
+  scale: 0;
+}
+
+.valueLarger {
+  scale: 2;
+}
