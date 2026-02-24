@@ -8,7 +8,7 @@ import type { RewardWeights } from "../ai/rewardUtils";
 import { getMoveInterval } from "../utils/moveInterval";
 
 /** Auto-save the model every this many completed training steps. */
-const SAVE_EVERY = 100;
+const SAVE_EVERY = 20;
 
 /** Shared model keys stored in IndexedDB. */
 export const BEST_MODEL_KEY = "2048-dqn-best";
