@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useSwipeable } from "react-swipeable";
 import useDocumentEventListener from "../../hooks/useDocumentEventListener";
+import useAiPlayer from "../../hooks/useAiPlayer";
 import type { Cell, Coordinate } from "../../types";
 import addNewCell from "../../utils/addNewCell";
 import getTiltDirectionByKey from "../../utils/getTiltDirectionByKey";
@@ -20,7 +21,7 @@ const Game = () => {
     score: number;
   }>(createGameState);
 
-  const updateStateByVector = (vector: Coordinate<-1 | 0 | 1>) => {
+  const updateStateByVector = useCallback((vector: Coordinate<-1 | 0 | 1>) => {
     setState((prevState) => {
       const { score } = prevState;
       const cells = prevState.cells.filter((it) => !it.consumedBy);
@@ -42,10 +43,14 @@ const Game = () => {
         return prevState;
       }
     });
-  };
+  }, []);
+
+  const { aiEnabled, toggleAi, workerReady } = useAiPlayer(cells, updateStateByVector);
+
   useDocumentEventListener({
     type: "keydown",
     listener: (e) => {
+      if (aiEnabled) return; // Don't override AI moves with keyboard
       const direction = getTiltDirectionByKey(e.key);
       if (!direction) return;
       const vector = get2DVectorByTiltDirection(direction);
@@ -55,6 +60,7 @@ const Game = () => {
   const handlers = useSwipeable({
     preventScrollOnSwipe: true,
     onSwiped: ({ dir }) => {
+      if (aiEnabled) return; // Don't override AI moves with swipe
       const vector = get2DVectorByTiltDirection(dir);
       updateStateByVector(vector);
     },
@@ -66,7 +72,13 @@ const Game = () => {
 
   return (
     <div className={styles.game} {...handlers}>
-      <GameMenu score={score} restartGame={restartGame} />
+      <GameMenu
+        score={score}
+        restartGame={restartGame}
+        aiEnabled={aiEnabled}
+        toggleAi={toggleAi}
+        aiWorkerReady={workerReady}
+      />
       <Grid cells={cells.slice().sort((a, b) => a.id - b.id)} />
     </div>
   );

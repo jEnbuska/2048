@@ -11,3 +11,10 @@
   box-sizing: border-box;
   margin-top: min(3vw, 16px);
 }
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: min(2vw, 8px);
+}
