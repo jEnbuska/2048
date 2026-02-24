@@ -1,0 +1,30 @@
+.aiPlayer {
+  border: none;
+  background: none;
+  grid-column: 1 / span 2;
+  filter: invert(0.15);
+  color: #786e65;
+  font-size: min(35px, 8vw);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2em;
+  cursor: pointer;
+  opacity: 1;
+  transition:
+    color 0.15s,
+    opacity 0.15s;
+}
+
+.aiPlayer:hover:not(:disabled) {
+  color: #302b27;
+}
+
+.aiPlayer:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.aiPlayer[aria-pressed="true"] {
+  color: #e07430;
+}
