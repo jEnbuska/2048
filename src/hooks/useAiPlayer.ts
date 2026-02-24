@@ -167,6 +167,15 @@ export default function useAiPlayer(
             applyDirection(msg.direction);
           }
           pendingActionRef.current = false;
+          // Always reschedule here. When a move is a no-op (the board doesn't
+          // change), the cells effect never fires so scheduleNextMove() would
+          // never be called from there – permanently stalling the loop.
+          // For effective moves the cells effect will also call scheduleNextMove(),
+          // which simply cancels this timer and re-creates it with the updated
+          // free-cell count (the correct, desired behaviour).
+          if (aiEnabledRef.current) {
+            scheduleNextMove();
+          }
           break;
 
         case "TRAIN_RESULT":
@@ -215,7 +224,7 @@ export default function useAiPlayer(
       worker.terminate();
       workerRef.current = null;
     };
-  }, [applyDirection]);
+  }, [applyDirection, scheduleNextMove]);
 
   // After each AI move the cells (and possibly score) update.
   // Drain the pending experience queue and schedule the next move.
