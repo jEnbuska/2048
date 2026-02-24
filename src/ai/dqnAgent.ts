@@ -180,6 +180,84 @@ export class DQNAgent {
     return ACTIONS[index];
   }
 
+  /**
+   * Blended epsilon-greedy action selection.
+   *
+   * Combines the DQN's Q-values with caller-supplied per-action scores
+   * (e.g. from a lookahead search) using a configurable blend weight.
+   *
+   * During exploration (ε-greedy random phase) the selection is restricted to
+   * actions that the external scores consider valid (finite score), so the
+   * agent avoids obvious no-op moves even while exploring.
+   *
+   * During exploitation the DQN Q-values and the external scores are each
+   * normalised independently to [0, 1] before being linearly combined:
+   *
+   *   combined[i] = (1 − blendWeight) × qNorm[i] + blendWeight × extNorm[i]
+   *
+   * The action with the highest combined score is returned.
+   *
+   * @param stateTensor    Pre-encoded board as Float32Array (length 272).
+   * @param externalScores Per-action external scores (e.g. lookahead). Use
+   *                       -Infinity for actions that should be avoided.
+   * @param blendWeight    Weight of external scores in [0, 1]; 0 = pure DQN.
+   * @returns Index into ACTIONS [0–3].
+   */
+  selectActionBlended(
+    stateTensor: Float32Array,
+    externalScores: number[],
+    blendWeight = 0.6,
+  ): number {
+    if (Math.random() < this.epsilon) {
+      // Prefer valid (non-no-op) actions during random exploration.
+      const validIndices = externalScores
+        .map((s, i) => (isFinite(s) ? i : -1))
+        .filter((i) => i >= 0);
+      if (validIndices.length > 0) {
+        return validIndices[Math.floor(Math.random() * validIndices.length)];
+      }
+      return Math.floor(Math.random() * NUM_ACTIONS);
+    }
+
+    return tf.tidy(() => {
+      const input = tf.tensor4d(stateTensor, [1, ...INPUT_SHAPE]);
+      const qTensor = this.policy.predict(input) as tf.Tensor;
+      const qValues = Array.from(qTensor.dataSync() as Float32Array);
+
+      // Normalise Q-values to [0, 1].
+      const qMin = Math.min(...qValues);
+      const qMax = Math.max(...qValues);
+      const qRange = qMax - qMin || 1;
+      const qNorm = qValues.map((q) => (q - qMin) / qRange);
+
+      // Normalise finite external scores to [0, 1]; invalid actions get -1.
+      const finite = externalScores.filter((v) => isFinite(v));
+
+      // If no valid actions exist (all no-ops, game stuck), fall back to pure
+      // DQN greedy selection to avoid degenerate blending behaviour.
+      if (finite.length === 0) {
+        return qNorm.indexOf(Math.max(...qNorm));
+      }
+
+      const extMin = Math.min(...finite);
+      const extMax = Math.max(...finite);
+      const extRange = extMax - extMin || 1;
+      const extNorm = externalScores.map((v) =>
+        isFinite(v) ? (v - extMin) / extRange : -1,
+      );
+
+      // Blend and pick the best action.
+      // Invalid actions (extNorm === -1) are set to -Infinity so they can
+      // never be selected during exploitation, regardless of their Q-value.
+      const combined = qNorm.map((q, i) =>
+        isFinite(externalScores[i])
+          ? (1 - blendWeight) * q + blendWeight * extNorm[i]
+          : -Infinity,
+      );
+      return combined.indexOf(Math.max(...combined));
+    });
+  }
+
   // ── Memory ───────────────────────────────────────────────────────────────
 
   remember(exp: Experience): void {

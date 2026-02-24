@@ -27,6 +27,7 @@ import "@tensorflow/tfjs"; // registers WebGL / CPU backend
 import { DQNAgent, ACTIONS } from "./dqnAgent";
 import type { DQNConfig, Experience } from "./dqnAgent";
 import { encodeBoardFlat } from "./encoding";
+import { computeLookaheadScores, LOOKAHEAD_WEIGHT } from "./lookahead";
 import type { Cell, TiltDirection } from "../types";
 
 // ─── Message types ────────────────────────────────────────────────────────────
@@ -63,7 +64,8 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
       case "SELECT_ACTION": {
         if (!agent) throw new Error("Agent not initialised");
         const flat = encodeBoardFlat(msg.cells);
-        const actionIndex = agent.selectAction(flat);
+        const lookaheadScores = computeLookaheadScores(msg.cells);
+        const actionIndex = agent.selectActionBlended(flat, lookaheadScores, LOOKAHEAD_WEIGHT);
         const direction = ACTIONS[actionIndex];
         self.postMessage({
           type: "ACTION",
