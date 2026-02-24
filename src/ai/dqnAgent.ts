@@ -115,11 +115,17 @@ export interface DQNConfig {
   epsilonStart?: number;
   /**
    * Number of gradient steps over which ε is linearly annealed from
-   * `epsilonStart` to 0.  After this many steps the agent acts purely
-   * greedily, having exhausted its exploration budget.
+   * `epsilonStart` to `epsilonMin`.  After this many steps the agent acts
+   * with minimal exploration, having exhausted its main exploration budget.
    * Default: 50 000.
    */
   epsilonDecaySteps?: number;
+  /**
+   * Minimum exploration rate ε that the agent never falls below.
+   * Keeping a small floor (default 0.05) prevents the agent from converging
+   * to a fully greedy policy that can no longer escape local optima.
+   */
+  epsilonMin?: number;
   /** Copy policy → target network every N steps. */
   targetUpdateFrequency?: number;
 }
@@ -135,6 +141,7 @@ export class DQNAgent {
   readonly batchSize: number;
   readonly gamma: number;
   readonly epsilonStart: number;
+  readonly epsilonMin: number;
   readonly epsilonDecaySteps: number;
   readonly targetUpdateFrequency: number;
 
@@ -142,6 +149,7 @@ export class DQNAgent {
     this.batchSize = config.batchSize ?? 64;
     this.gamma = config.gamma ?? 0.99;
     this.epsilonStart = config.epsilonStart ?? 1.0;
+    this.epsilonMin = config.epsilonMin ?? 0.05;
     this.epsilonDecaySteps = config.epsilonDecaySteps ?? 50_000;
     this.epsilon = this.epsilonStart;
     this.targetUpdateFrequency = config.targetUpdateFrequency ?? 500;
@@ -150,7 +158,7 @@ export class DQNAgent {
     this.target = buildModel();
     this.syncTargetNetwork();
 
-    this.memory = new ReplayMemory(config.memoryCapacity ?? 10_000);
+    this.memory = new ReplayMemory(config.memoryCapacity ?? 50_000);
   }
 
   // ── Exploration ──────────────────────────────────────────────────────────
@@ -357,12 +365,13 @@ export class DQNAgent {
     tf.dispose(grads.grads);
     loss.dispose();
 
-    // Linear epsilon decay: ε = epsilonStart × (1 − steps / epsilonDecaySteps)
-    // Reaches exactly 0 after `epsilonDecaySteps` gradient updates, giving the
-    // agent maximum exploration early and pure greedy play afterwards.
+    // Linear epsilon decay: ε decays from epsilonStart down to epsilonMin
+    // over epsilonDecaySteps gradient updates.  The floor ensures the agent
+    // never stops exploring entirely, preventing it from getting stuck in a
+    // local greedy policy after the main exploration budget is exhausted.
     this.steps++;
     this.epsilon = Math.max(
-      0,
+      this.epsilonMin,
       this.epsilonStart * (1 - this.steps / this.epsilonDecaySteps),
     );
 
