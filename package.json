@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "prettier": "prettier --check ./src",
-    "prettier:write": "prettier --write ./src"
+    "prettier:write": "prettier --write ./src",
+    "test": "vitest run"
   },
   "dependencies": {
     "classnames": "^2.5.1",
