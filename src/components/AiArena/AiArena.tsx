@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useTransition,
   memo,
 } from "react";
 import type { Cell, Coordinate } from "../../types";
@@ -36,6 +37,14 @@ const MAX_LEADERBOARD = 10;
 const MAX_WORKERS = 16;
 /** Maximum number of game scores retained in the performance graph. */
 const MAX_SCORE_HISTORY = 10_000;
+/** Maximum number of data points passed to the score graph for rendering. */
+const MAX_GRAPH_SCORES = 500;
+/** Rolling window sizes used for the score-average tiles. */
+const AVG_WINDOW_100 = 100;
+const AVG_WINDOW_1000 = 1_000;
+const AVG_WINDOW_10000 = 10_000;
+/** How often (ms) pending training-step counts and score history are flushed to state/storage. */
+const FLUSH_INTERVAL_MS = 2_000;
 
 /**
  * Number of top-performing weight configurations kept in the elite pool.
@@ -157,6 +166,10 @@ interface ArenaStats {
   allTimeSum: number;
   /** Count of all non-zero game scores recorded (for the all-time average). */
   allTimeCount: number;
+  /** Precomputed rolling averages – null until the window has enough games. */
+  avg100: number | null;
+  avg1000: number | null;
+  avg10000: number | null;
 }
 
 function loadStats(): ArenaStats {
@@ -169,12 +182,15 @@ function loadStats(): ArenaStats {
         totalIterations: parsed.totalIterations ?? 0,
         allTimeSum: parsed.allTimeSum ?? 0,
         allTimeCount: parsed.allTimeCount ?? 0,
+        avg100: parsed.avg100 ?? null,
+        avg1000: parsed.avg1000 ?? null,
+        avg10000: parsed.avg10000 ?? null,
       };
     }
   } catch {
     // fall through
   }
-  return { totalModels: 0, totalIterations: 0, allTimeSum: 0, allTimeCount: 0 };
+  return { totalModels: 0, totalIterations: 0, allTimeSum: 0, allTimeCount: 0, avg100: null, avg1000: null, avg10000: null };
 }
 
 function saveStats(stats: ArenaStats) {
@@ -410,7 +426,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
 
 // ─── ScoreStats ───────────────────────────────────────────────────────────────
 
-/** Displays the historical score averages for 4 rolling windows. */
+/** Displays the historical score averages for up to 4 rolling windows. */
 function windowAvg(scores: number[], n: number): number | null {
   const slice = n > 0 ? scores.slice(-n) : scores;
   if (slice.length === 0) return null;
@@ -418,17 +434,16 @@ function windowAvg(scores: number[], n: number): number | null {
 }
 
 interface ScoreStatsProps {
-  scoreHistory: number[];
   stats: ArenaStats;
 }
 
-function ScoreStats({ scoreHistory, stats }: ScoreStatsProps) {
+function ScoreStats({ stats }: ScoreStatsProps) {
   const allTimeAvg =
     stats.allTimeCount > 0 ? stats.allTimeSum / stats.allTimeCount : null;
-  const windows: Array<{ label: string; n: number }> = [
-    { label: "Last 100", n: 100 },
-    { label: "Last 1,000", n: 1_000 },
-    { label: "Last 10,000", n: 10_000 },
+  const windows: Array<{ label: string; avg: number | null }> = [
+    { label: "Last 100", avg: stats.avg100 },
+    { label: "Last 1,000", avg: stats.avg1000 },
+    { label: "Last 10,000", avg: stats.avg10000 },
   ];
   return (
     <div className={styles.scoreStats}>
@@ -438,17 +453,16 @@ function ScoreStats({ scoreHistory, stats }: ScoreStatsProps) {
           {allTimeAvg !== null ? Math.round(allTimeAvg).toLocaleString() : "—"}
         </span>
       </div>
-      {windows.map(({ label, n }) => {
-        const value = scoreHistory.length > 0 ? windowAvg(scoreHistory, n) : null;
-        return (
+      {windows.map(({ label, avg }) =>
+        avg !== null ? (
           <div key={label} className={styles.scoreStatItem}>
             <span className={styles.scoreStatLabel}>{label}</span>
             <span className={styles.scoreStatValue}>
-              {value !== null ? Math.round(value).toLocaleString() : "—"}
+              {Math.round(avg).toLocaleString()}
             </span>
           </div>
-        );
-      })}
+        ) : null,
+      )}
     </div>
   );
 }
@@ -456,6 +470,7 @@ function ScoreStats({ scoreHistory, stats }: ScoreStatsProps) {
 // ─── AiArena ─────────────────────────────────────────────────────────────────
 
 export default function AiArena() {
+  const [, startTransition] = useTransition();
   const [workerCount, setWorkerCount] = useState(4);
   const [autoRestart, setAutoRestart] = useState(true);
   const [speedMode, setSpeedMode] = useState(false);
@@ -467,15 +482,31 @@ export default function AiArena() {
     leaderboard.length > 0 ? leaderboard[0].score : 0,
   );
 
-  const [stats, setStats] = useState<ArenaStats>(loadStats);
+  // Score history lives in a mutable ref to avoid the O(n) array copy that a
+  // functional setState would require on every game-over.  A downsampled slice
+  // is flushed to `graphScores` state (≤ MAX_GRAPH_SCORES points) via
+  // startTransition so the chart re-renders without blocking urgent work.
+  const scoreHistoryRef = useRef<number[]>(loadScoreHistory());
 
-  // ── Score history (for performance graph) ─────────────────────────────────
-  const [scoreHistory, setScoreHistory] = useState<number[]>(loadScoreHistory);
+  const [stats, setStats] = useState<ArenaStats>(() => {
+    const s = loadStats();
+    const h = scoreHistoryRef.current;
+    return {
+      ...s,
+      avg100: h.length >= AVG_WINDOW_100 ? windowAvg(h, AVG_WINDOW_100) : null,
+      avg1000: h.length >= AVG_WINDOW_1000 ? windowAvg(h, AVG_WINDOW_1000) : null,
+      avg10000: h.length >= AVG_WINDOW_10000 ? windowAvg(h, AVG_WINDOW_10000) : null,
+    };
+  });
 
-  // Persist score history whenever it changes
-  useEffect(() => {
-    saveScoreHistory(scoreHistory);
-  }, [scoreHistory]);
+  const [graphScores, setGraphScores] = useState<number[]>(() =>
+    scoreHistoryRef.current.slice(-MAX_GRAPH_SCORES),
+  );
+
+  // Pending iteration increments are accumulated in a ref and flushed to the
+  // stats state every FLUSH_INTERVAL_MS, replacing one setState per training
+  // step with at most one every two seconds.
+  const pendingIterationsRef = useRef(0);
 
   // ── Backend label (reported by the first worker) ──────────────────────────
   const [backendLabel, setBackendLabel] = useState<string | null>(null);
@@ -526,53 +557,82 @@ export default function AiArena() {
     saveLeaderboard(leaderboard);
   }, [leaderboard]);
 
+  // Flush pending training-step counts and persist score history every 2 s.
+  // This replaces one setState per training step with at most one per interval.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const delta = pendingIterationsRef.current;
+      if (delta > 0) {
+        pendingIterationsRef.current = 0;
+        startTransition(() => {
+          setStats((prev) => ({ ...prev, totalIterations: prev.totalIterations + delta }));
+        });
+      }
+      saveScoreHistory(scoreHistoryRef.current);
+    }, FLUSH_INTERVAL_MS);
+    return () => clearInterval(id);
+  // startTransition is stable and never changes between renders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleGameOver = useCallback(
     (slotId: number, score: number, saveAsBest: () => void, slotWeights: RewardWeights) => {
-      // Single functional update: always bump totalModels and, for non-zero
-      // scores, accumulate the running totals used for the all-time average.
-      setStats((prev) => ({
-        ...prev,
-        totalModels: prev.totalModels + 1,
-        allTimeSum: score > 0 ? prev.allTimeSum + score : prev.allTimeSum,
-        allTimeCount: score > 0 ? prev.allTimeCount + 1 : prev.allTimeCount,
-      }));
+      // Capture the best weights NOW (before any state update) so that
+      // generateEvolved below always uses the correct value even when a new
+      // high-score causes setBestWeights to be queued in the same batch.
+      const currentBestWeights =
+        score > bestScoreRef.current ? slotWeights : bestWeightsRef.current;
 
       if (score > bestScoreRef.current) {
         bestScoreRef.current = score;
         saveAsBest();
-        // Evolutionary step: winner's weights become the new base so the next
-        // generation of slots explores the surrounding hyperparameter region.
         setBestWeights(slotWeights);
       }
 
-      // Skip trivial scores (game ended before making any moves).
-      if (score === 0) return;
+      // Update elite pool with this result.
+      if (score > 0) {
+        elitePoolRef.current = [
+          ...elitePoolRef.current,
+          { weights: slotWeights, score },
+        ]
+          .sort((a, b) => b.score - a.score)
+          .slice(0, ELITE_POOL_SIZE);
+      }
 
-      // Track score in history for the performance graph.
-      setScoreHistory((prev) => {
-        const next = [...prev, score];
-        return next.length > MAX_SCORE_HISTORY ? next.slice(-MAX_SCORE_HISTORY) : next;
-      });
-
-      // Update elite pool with this game's result.
-      elitePoolRef.current = [
-        ...elitePoolRef.current,
-        { weights: slotWeights, score },
-      ]
-        .sort((a, b) => b.score - a.score)
-        .slice(0, ELITE_POOL_SIZE);
-
-      // Evolve weights for the completed slot's next game.
+      // Evolve weights for the completed slot's next game.  Not deferred so
+      // the slot receives fresh weights before its 800 ms restart timer fires.
       setSlotWeights((prev) => {
         const next = [...prev];
-        next[slotId] = generateEvolved(
-          elitePoolRef.current,
-          bestWeightsRef.current,
-        );
+        next[slotId] = generateEvolved(elitePoolRef.current, currentBestWeights);
         return next;
       });
 
-      // Add to leaderboard.
+      // Zero-score game: only bump the model counter, nothing else to record.
+      if (score === 0) {
+        startTransition(() => {
+          setStats((prev) => ({ ...prev, totalModels: prev.totalModels + 1 }));
+        });
+        return;
+      }
+
+      // Append to history ref – O(1) push instead of the O(n) spread a
+      // functional setState would require.
+      scoreHistoryRef.current.push(score);
+      if (scoreHistoryRef.current.length > MAX_SCORE_HISTORY) {
+        scoreHistoryRef.current = scoreHistoryRef.current.slice(-MAX_SCORE_HISTORY);
+      }
+      const history = scoreHistoryRef.current;
+
+      // Precompute window averages – null when the window is not yet full,
+      // which prevents all three averages from showing the same value early on.
+      const avg100 = history.length >= AVG_WINDOW_100 ? windowAvg(history, AVG_WINDOW_100) : null;
+      const avg1000 = history.length >= AVG_WINDOW_1000 ? windowAvg(history, AVG_WINDOW_1000) : null;
+      const avg10000 = history.length >= AVG_WINDOW_10000 ? windowAvg(history, AVG_WINDOW_10000) : null;
+
+      // Snapshot the graph slice now so the transition closure always captures
+      // the data current at this game-over, even if the ref is mutated later.
+      const graphSlice = history.slice(-MAX_GRAPH_SCORES);
+
       const entry: LeaderboardEntry = {
         id: crypto.randomUUID(),
         name: getRandomFunnyName(),
@@ -580,22 +640,36 @@ export default function AiArena() {
         achievedAt: new Date().toISOString(),
         rewardWeights: slotWeights,
       };
-      setLeaderboard((prev) =>
-        [...prev, entry]
-          .sort((a, b) => b.score - a.score)
-          .slice(0, MAX_LEADERBOARD),
-      );
+
+      // Stats, graph and leaderboard are display-only – defer via transition so
+      // they never block urgent game renders.
+      startTransition(() => {
+        setStats((prev) => ({
+          totalModels: prev.totalModels + 1,
+          totalIterations: prev.totalIterations,
+          allTimeSum: prev.allTimeSum + score,
+          allTimeCount: prev.allTimeCount + 1,
+          avg100,
+          avg1000,
+          avg10000,
+        }));
+
+        setGraphScores(graphSlice);
+
+        setLeaderboard((prev) =>
+          [...prev, entry]
+            .sort((a, b) => b.score - a.score)
+            .slice(0, MAX_LEADERBOARD),
+        );
+      });
     },
-    [],
+    [startTransition],
   );
 
   const handleTrainStep = useCallback(() => {
-    // Functional update ensures concurrent TRAIN_RESULT messages from multiple
-    // workers are queued and processed sequentially without losing counts.
-    setStats((prev) => ({
-      ...prev,
-      totalIterations: prev.totalIterations + 1,
-    }));
+    // Accumulate in a ref; the 2-second interval flushes to React state so
+    // we avoid one setState (and re-render) per worker training step.
+    pendingIterationsRef.current++;
   }, []);
 
   const restartAll = useCallback(() => {
@@ -623,9 +697,11 @@ export default function AiArena() {
     void deleteModelArtifact(BEST_MODEL_KEY).catch(() => {});
     void deleteModelArtifact(POLICY_MODEL_KEY).catch(() => {});
     // Reset all in-memory state.
+    scoreHistoryRef.current = [];
+    pendingIterationsRef.current = 0;
+    setGraphScores([]);
     setLeaderboard([]);
-    setStats({ totalModels: 0, totalIterations: 0, allTimeSum: 0, allTimeCount: 0 });
-    setScoreHistory([]);
+    setStats({ totalModels: 0, totalIterations: 0, allTimeSum: 0, allTimeCount: 0, avg100: null, avg1000: null, avg10000: null });
     bestScoreRef.current = 0;
     elitePoolRef.current = [];
     setBestWeights({ ...REWARD_WEIGHTS });
@@ -724,11 +800,11 @@ export default function AiArena() {
       </div>
 
       {/* ── Performance graph ── */}
-      {scoreHistory.length >= 2 && (
+      {graphScores.length >= 2 && (
         <div className={styles.scoreGraph}>
           <span className={styles.scoreGraphTitle}>📈 Score History</span>
-          <ScoreGraph scores={scoreHistory} />
-          <ScoreStats scoreHistory={scoreHistory} stats={stats} />
+          <ScoreGraph scores={graphScores} />
+          <ScoreStats stats={stats} />
         </div>
       )}
 
