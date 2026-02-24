@@ -1,17 +1,17 @@
-import { Cell, Coordinate } from "../types";
+import type { Cell, Coordinate } from "../types";
 import clearSlack from "./clearSlack";
 import compareFromVector from "./compareFromVector";
 import consumeNeighbour from "./consumeNeighbour";
 
 export default function tilt(
   vector: Coordinate<-1 | 0 | 1>,
-  cells: Cell[]
+  cells: Cell[],
 ): Cell[] {
-  cells = cells.slice().sort(compareFromVector(vector)); // Sort cells from furthest direction of the tilt
+  cells = cells.slice().sort(compareFromVector(vector)); // Sort cells from the furthest direction of the tilt
   cells = cells.reduce(
     // Remove all extra slack between the cells
     (cells, cell) => clearSlack({ cell, vector, cells }),
-    cells
+    cells,
   );
   cells = cells.reduce((cells, cell) => {
     return consumeNeighbour({ vector, cells, cell });
@@ -20,7 +20,7 @@ export default function tilt(
   cells = cells.reduce(
     // Remove all extra slack between the cells, that was caused during filtering
     (cells, cell) => clearSlack({ cell, vector, cells }),
-    cells
+    cells,
   );
 
   return cells.map((cell) => {

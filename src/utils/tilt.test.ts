@@ -1,10 +1,8 @@
-import { result } from "lodash";
 import { test, describe, expect } from "vitest";
-import { Cell } from "../types";
-import compareFromVector from "./compareFromVector";
 import tilt from "./tilt";
+import type { Cell } from "../types.ts";
 
-function expectArrayContentToEqual(actual: any[], expected: any[]) {
+function expectArrayContentToEqual(actual: Array<Cell>, expected: Array<Cell>) {
   expect(actual).toStrictEqual(expect.arrayContaining(expected));
   expect(expected).toStrictEqual(expect.arrayContaining(actual));
 }
@@ -13,48 +11,48 @@ describe("tilt 1 cell", () => {
   describe("tilt up", () => {
     test("tilt up 1 cell", () => {
       expect(
-        tilt({ x: 0, y: -1 }, [{ x: 0, y: 3, value: 2, id: 1 }])
+        tilt({ x: 0, y: -1 }, [{ x: 0, y: 3, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 0, y: 0, value: 2, id: 1 }]);
     });
     test("tilt up 1 unmovable cell", () => {
       expect(
-        tilt({ x: 0, y: -1 }, [{ x: 0, y: 0, value: 2, id: 1 }])
+        tilt({ x: 0, y: -1 }, [{ x: 0, y: 0, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 0, y: 0, value: 2, id: 1 }]);
     });
   });
   describe("tilt down", () => {
     test("tilt down 1 cell", () => {
       expect(
-        tilt({ x: 0, y: 1 }, [{ x: 0, y: 0, value: 2, id: 1 }])
+        tilt({ x: 0, y: 1 }, [{ x: 0, y: 0, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 0, y: 3, value: 2, id: 1 }]);
     });
     test("tilt down 1 unmovable cell", () => {
       expect(
-        tilt({ x: 0, y: 1 }, [{ x: 0, y: 3, value: 2, id: 1 }])
+        tilt({ x: 0, y: 1 }, [{ x: 0, y: 3, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 0, y: 3, value: 2, id: 1 }]);
     });
   });
   describe("left", () => {
     test("tilt left 1 cell", () => {
       expect(
-        tilt({ x: -1, y: 0 }, [{ x: 3, y: 0, value: 2, id: 1 }])
+        tilt({ x: -1, y: 0 }, [{ x: 3, y: 0, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 0, y: 0, value: 2, id: 1 }]);
     });
     test("tilt left 1 unmovable cell", () => {
       expect(
-        tilt({ x: -1, y: 0 }, [{ x: 0, y: 0, value: 2, id: 1 }])
+        tilt({ x: -1, y: 0 }, [{ x: 0, y: 0, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 0, y: 0, value: 2, id: 1 }]);
     });
   });
   describe("right", () => {
     test("tilt right 1 cell", () => {
       expect(
-        tilt({ x: 1, y: 0 }, [{ x: 0, y: 0, value: 2, id: 1 }])
+        tilt({ x: 1, y: 0 }, [{ x: 0, y: 0, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 3, y: 0, value: 2, id: 1 }]);
     });
     test("tilt right 1 unmovable cell", () => {
       expect(
-        tilt({ x: 1, y: 0 }, [{ x: 3, y: 0, value: 2, id: 1 }])
+        tilt({ x: 1, y: 0 }, [{ x: 3, y: 0, value: 2, id: 1 }]),
       ).toStrictEqual([{ x: 3, y: 0, value: 2, id: 1 }]);
     });
   });

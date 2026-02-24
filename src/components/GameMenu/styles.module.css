@@ -1,0 +1,13 @@
+.gameMenu {
+  color: #786e65;
+  background-color: #eee4da;
+  border-radius: min(3vw, 16px);
+  filter: invert(0.15);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+  font-size: min(45px, 10vw);
+  padding: var(--gap-s);
+  box-sizing: border-box;
+  margin-top: min(3vw, 16px);
+}

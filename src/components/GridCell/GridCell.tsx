@@ -1,5 +1,5 @@
-import React, { memo } from "react";
-import { Cell } from "../../types";
+import { memo } from "react";
+import type { Cell } from "../../types";
 import GridCellValue from "../GridCellValue/GridCellValue";
 import styles from "./styles.module.css";
 import classnames from "classnames";
@@ -13,7 +13,7 @@ const GridCell = memo(({ value, y, x, consumedBy }: OwnProps) => {
       className={classnames(
         styles.cell,
         styles[`cell-${value}`],
-        consumedBy && styles.cellConsumed
+        consumedBy && styles.cellConsumed,
       )}
       style={{ left, top }}
     >
@@ -22,4 +22,5 @@ const GridCell = memo(({ value, y, x, consumedBy }: OwnProps) => {
   );
 });
 
+GridCell.displayName = "GridCell";
 export default GridCell;

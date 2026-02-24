@@ -1,7 +1,7 @@
-import { Coordinate, TiltDirection } from "../types";
+import type { Coordinate, TiltDirection } from "../types";
 
-export default function getVectorByTiltDirection(
-  direction: TiltDirection
+export default function get2DVectorByTiltDirection(
+  direction: TiltDirection,
 ): Coordinate<-1 | 0 | 1> {
   switch (direction) {
     case "Left":

@@ -8,7 +8,7 @@
   align-items: center;
   font-weight: bold;
   z-index: 1;
-  --cell-transition-speed: .2s;
+  --cell-transition-speed: 0.2s;
   transition: var(--cell-transition-speed);
   overflow: hidden;
   color: var(--cell-text-color);
@@ -31,7 +31,6 @@
     scale: 1;
   }
 }
-
 
 .cell-2 {
   --cell-background-color: #eee4da;
@@ -102,4 +101,3 @@
 .cellConsumed {
   z-index: 0;
 }
-

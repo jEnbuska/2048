@@ -1,11 +1,11 @@
-import { Cell, Coordinate } from "../types";
+import type { Cell, Coordinate } from "../types";
 
 export default function getNonConsumedCell(
   cells: Cell[],
-  coordinates: Coordinate
+  coordinates: Coordinate,
 ) {
   return cells.find(
     ({ x, y, consumedBy }) =>
-      x === coordinates.x && y === coordinates.y && !consumedBy
+      x === coordinates.x && y === coordinates.y && !consumedBy,
   );
 }

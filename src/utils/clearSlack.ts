@@ -1,6 +1,6 @@
-import { Cell, Coordinate } from "../types";
+import type { Cell, Coordinate } from "../types";
 import addCoordinates from "./addCoordinates";
-import { GRID_SIZE } from "./constants";
+import { GRID_SIZE } from "../constants.ts";
 import getNonConsumedCell from "./getNonConsumedCell";
 
 /** moves the given */

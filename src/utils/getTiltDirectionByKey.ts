@@ -1,7 +1,7 @@
-import { TiltDirection } from "../types";
+import type { TiltDirection } from "../types";
 
 export default function getTiltDirectionByKey(
-  key: string
+  key: string,
 ): TiltDirection | undefined {
   switch (key) {
     case "ArrowLeft":

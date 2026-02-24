@@ -1,7 +1,6 @@
 import classnames from "classnames";
-import { range } from "lodash";
-import React from "react";
 import styles from "./styles.module.css";
+import { range } from "../../utils/range.ts";
 
 type OwnProps = {
   value: number;
@@ -19,7 +18,7 @@ const GridCellValue = ({ value }: OwnProps) => {
                 styles.value,
                 value === n && styles.valueActive,
                 value < n && styles.valueLarger,
-                value > n && styles.valueSmaller
+                value > n && styles.valueSmaller,
               )}
               key={`value-${n}`}
             >

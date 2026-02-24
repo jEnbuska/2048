@@ -1,4 +1,4 @@
-import { Cell, Coordinate } from "../types";
+import type { Cell, Coordinate } from "../types";
 import addCoordinates from "./addCoordinates";
 import getNonConsumedCell from "./getNonConsumedCell";
 

@@ -1,20 +1,21 @@
 .game {
-  display: flex;
+  display: grid;
   align-items: center;
   justify-content: center;
+  grid-template-rows: max-content 1fr;
   min-width: 320px;
   min-height: 100vh;
   width: 100vw;
-  background-color: #f9f8ee;;
+  background-color: #f9f8ee;
 }
 
-.game, .game * {
+.game,
+.game * {
   user-select: none !important;
 }
 
 @supports (min-height: 100svh) {
   .game {
-    min-height: 100 svh;
+    min-height: 100svh;
   }
 }
-

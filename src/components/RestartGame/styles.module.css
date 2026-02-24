@@ -1,0 +1,13 @@
+.restartGame {
+  border: none;
+  background: none;
+  filter: invert(0.15);
+  color: #786e65;
+  font-size: min(35px, 8vw);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.restartGame:hover {
+  color: #302b27;
+}
