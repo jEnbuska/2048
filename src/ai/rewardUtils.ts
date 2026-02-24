@@ -5,13 +5,28 @@ import { countEmptyCells } from "./encoding";
 /**
  * Weights used when computing the composite reward signal.
  * These can be tuned during the heuristic-tuning phase.
+ *
+ * Rationale for values:
+ *  mergeBonus    – doubled from 1.0 so that high-value merges are the
+ *                  dominant incentive, not just board topology.
+ *  emptyTiles    – reduced from 2.7 to 2.0 to prevent it from swamping
+ *                  the merge signal.
+ *  monotonicity  – increased from 1.0 to 1.5; ordering tiles matters.
+ *  cornerBonus   – unchanged; high tile in a corner is strongly desired.
+ *  smoothness    – new; rewards adjacent tiles that are close in log₂
+ *                  value (easy to chain-merge).
+ *  maxTileBonus  – new; steady gradient for building ever-higher tiles.
+ *  gameOverPenalty – increased 5× in magnitude; terminal state should
+ *                  be far more costly than any single good move.
  */
 export const REWARD_WEIGHTS = {
-  mergeBonus: 1.0,
-  emptyTiles: 2.7,
-  monotonicity: 1.0,
+  mergeBonus: 2.0,
+  emptyTiles: 2.0,
+  monotonicity: 1.5,
   cornerBonus: 3.0,
-  gameOverPenalty: -1.0,
+  smoothness: 1.0,
+  maxTileBonus: 1.0,
+  gameOverPenalty: -5.0,
 } as const;
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -97,6 +112,53 @@ export function calculateCornerBonus(cells: Cell[]): number {
 // ─── main reward function ────────────────────────────────────────────────────
 
 /**
+ * Smoothness score.
+ *
+ * Rewards boards where neighbouring non-empty tiles have close values on a
+ * log₂ scale.  A "rough" board – one that alternates large and small tiles –
+ * is hard to untangle, while a "smooth" board can be merged in a chain.
+ * Returns a value in [0, 1].
+ */
+export function calculateSmoothness(cells: Cell[]): number {
+  const grid = buildGrid(cells);
+  let roughness = 0;
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      if (grid[r][c] === 0) continue;
+      const val = Math.log2(grid[r][c]);
+      // Right neighbour
+      if (c + 1 < GRID_SIZE && grid[r][c + 1] !== 0) {
+        roughness += Math.abs(val - Math.log2(grid[r][c + 1]));
+      }
+      // Down neighbour
+      if (r + 1 < GRID_SIZE && grid[r + 1][c] !== 0) {
+        roughness += Math.abs(val - Math.log2(grid[r + 1][c]));
+      }
+    }
+  }
+  // Maximum theoretical roughness: 24 adjacent pairs × max log₂ diff of 16
+  // (log₂(131072) − log₂(2) = 16).  Using Math.max(0, …) guards against
+  // edge-case tiles beyond the expected range.
+  return Math.max(0, 1 - roughness / 384);
+}
+
+/**
+ * Max-tile bonus.
+ *
+ * Provides a steady gradient reward proportional to the highest tile
+ * currently on the board (log₂ scale).  Encourages the agent to keep
+ * pushing toward higher tiles even when corner / monotonicity signals are
+ * already saturated.
+ * Returns a value in [0, 1].
+ */
+export function calculateMaxTileBonus(cells: Cell[]): number {
+  const active = cells.filter((c) => !c.consumedBy);
+  if (!active.length) return 0;
+  const maxValue = Math.max(...active.map((c) => c.value));
+  return Math.log2(maxValue) / 17; // Normalise against max exponent 17
+}
+
+/**
  * Returns true when the game has ended – the board is completely filled and
  * no adjacent tiles share the same value (no merge is possible in any
  * direction).
@@ -122,11 +184,14 @@ export function isGameOver(cells: Cell[]): boolean {
 /**
  * Composite reward used to train the DQN agent.
  *
- * Reward = mergeBonus  (log₂ of merged tile values)
- *        + emptyBonus  (number of empty cells)
- *        + monotonicity bonus
- *        + corner bonus
- *        − gameOverPenalty  (applied when the episode ends)
+ * Reward = mergeBonus     (log₂ of merged tile values)
+ *        + emptyBonus     (number of empty cells)
+ *        + monotonicity   bonus
+ *        + corner         bonus
+ *        + smoothness     bonus (new – adjacent tiles close in log₂ value)
+ *        + maxTileBonus   (new – gradient toward higher tiles)
+ *        − stagnation     penalty (wasted no-op move)
+ *        − gameOverPenalty (applied when the episode ends)
  *
  * All components are normalised to roughly the same magnitude before weighting.
  */
@@ -147,6 +212,8 @@ export function calculateReward(
 
   const mono = calculateMonotonicity(nextCells) * REWARD_WEIGHTS.monotonicity;
   const corner = calculateCornerBonus(nextCells) * REWARD_WEIGHTS.cornerBonus;
+  const smooth = calculateSmoothness(nextCells) * REWARD_WEIGHTS.smoothness;
+  const maxTile = calculateMaxTileBonus(nextCells) * REWARD_WEIGHTS.maxTileBonus;
 
   // Small penalty when the board state didn't change (wasted move).
   // Compare active-cell positions and values rather than relying on reference equality.
@@ -163,5 +230,5 @@ export function calculateReward(
   const stagnationPenalty = prevKey === nextKey ? -0.5 : 0;
   const gameOverPenalty = done ? REWARD_WEIGHTS.gameOverPenalty : 0;
 
-  return mergeBonus + emptyBonus + mono + corner + stagnationPenalty + gameOverPenalty;
+  return mergeBonus + emptyBonus + mono + corner + smooth + maxTile + stagnationPenalty + gameOverPenalty;
 }
