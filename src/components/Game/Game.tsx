@@ -30,7 +30,11 @@ const Game = () => {
           .filter((cell: Cell) => cell.consumedBy)
           .map((cell) => cell.value)
           .reduce((a, b) => a + b * 2, score);
-        if (JSON.stringify(nextCells) === JSON.stringify(cells)) {
+        const sortById = (a: Cell, b: Cell) => a.id - b.id;
+        if (
+          JSON.stringify(nextCells.slice().sort(sortById)) ===
+          JSON.stringify(cells.slice().sort(sortById))
+        ) {
           return prevState;
         }
         return { cells: addNewCell(nextCells), score: nextScore };
