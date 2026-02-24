@@ -23,23 +23,26 @@ export interface RewardWeights {
  * These can be tuned during the heuristic-tuning phase.
  *
  * Rationale for values:
- *  mergeBonus    – doubled from 1.0 so that high-value merges are the
- *                  dominant incentive, not just board topology.
+ *  mergeBonus    – reduced to 1.0 so that raw merge score is no longer
+ *                  the dominant incentive; corner-ordered layout should
+ *                  be rewarded far more.
  *  emptyTiles    – reduced from 2.7 to 2.0 to prevent it from swamping
- *                  the merge signal.
- *  monotonicity  – increased from 1.0 to 1.5; ordering tiles matters.
- *  cornerBonus   – unchanged; high tile in a corner is strongly desired.
- *  smoothness    – new; rewards adjacent tiles that are close in log₂
- *                  value (easy to chain-merge).
- *  maxTileBonus  – new; steady gradient for building ever-higher tiles.
- *  gameOverPenalty – increased 5× in magnitude; terminal state should
- *                  be far more costly than any single good move.
+ *                  the ordering signal.
+ *  monotonicity  – raised to 4.0; tiles lined up in order from a corner
+ *                  is the primary behaviour we want to incentivise.
+ *  cornerBonus   – raised to 6.0; having the highest tile anchored in a
+ *                  corner and the rest descending from it is strongly
+ *                  desired and must outweigh simple merge scoring.
+ *  smoothness    – rewards adjacent tiles close in log₂ value.
+ *  maxTileBonus  – steady gradient for building ever-higher tiles.
+ *  gameOverPenalty – large negative; terminal state should be far more
+ *                  costly than any single good move.
  */
 export const REWARD_WEIGHTS: RewardWeights = {
-  mergeBonus: 2.0,
+  mergeBonus: 1.0,
   emptyTiles: 2.0,
-  monotonicity: 1.5,
-  cornerBonus: 3.0,
+  monotonicity: 4.0,
+  cornerBonus: 6.0,
   smoothness: 1.0,
   maxTileBonus: 1.0,
   gameOverPenalty: -5.0,
