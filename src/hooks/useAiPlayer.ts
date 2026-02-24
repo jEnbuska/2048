@@ -3,7 +3,8 @@ import type { Cell, Coordinate, TiltDirection } from "../types";
 import get2DVectorByTiltDirection from "../utils/get2DVectorByTiltDirection";
 import type { WorkerInMessage, WorkerOutMessage } from "../ai/aiWorker";
 import { encodeBoardFlat, countEmptyCells } from "../ai/encoding";
-import { calculateReward, isGameOver } from "../ai/rewardUtils";
+import { calculateReward, isGameOver, REWARD_WEIGHTS } from "../ai/rewardUtils";
+import type { RewardWeights } from "../ai/rewardUtils";
 import { getMoveInterval } from "../utils/moveInterval";
 
 /** Auto-save the model every this many completed training steps. */
@@ -23,6 +24,12 @@ export interface UseAiPlayerOptions {
    * (clears pending experiences and reschedules the next move).
    */
   restartTrigger?: number;
+  /**
+   * Custom reward weights for this worker instance.
+   * Defaults to the global REWARD_WEIGHTS when omitted.
+   * Pass per-worker perturbed weights to enable runtime parameter tuning.
+   */
+  rewardWeights?: RewardWeights;
 }
 
 export interface UseAiPlayerReturn {
@@ -99,6 +106,13 @@ export default function useAiPlayer(
   useEffect(() => {
     onTrainStepRef.current = options.onTrainStep;
   }, [options.onTrainStep]);
+
+  // Keep the latest reward weights in a ref so experience calculations always
+  // use the value current at the time of the move, without needing re-renders.
+  const rewardWeightsRef = useRef<RewardWeights>(options.rewardWeights ?? REWARD_WEIGHTS);
+  useEffect(() => {
+    rewardWeightsRef.current = options.rewardWeights ?? REWARD_WEIGHTS;
+  }, [options.rewardWeights]);
 
   // Queue of experiences waiting for the cells to update before being sent
   const pendingExpsRef = useRef<PendingExp[]>([]);
@@ -257,7 +271,7 @@ export default function useAiPlayer(
           if (!exp) break;
           const state = encodeBoardFlat(exp.prevCells);
           const nextState = encodeBoardFlat(cells);
-          const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score, true);
+          const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score, true, rewardWeightsRef.current);
           worker.postMessage({
             type: "REMEMBER",
             experience: { state, action: exp.actionIndex, reward, nextState, done: true },
@@ -286,7 +300,7 @@ export default function useAiPlayer(
         const state = encodeBoardFlat(exp.prevCells);
         const nextState = encodeBoardFlat(cells);
         const done = isGameOver(cells);
-        const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score, done);
+        const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score, done, rewardWeightsRef.current);
         worker.postMessage({
           type: "REMEMBER",
           experience: { state, action: exp.actionIndex, reward, nextState, done },

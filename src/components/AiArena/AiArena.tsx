@@ -11,6 +11,8 @@ import tilt from "../../utils/tilt";
 import useAiPlayer from "../../hooks/useAiPlayer";
 import Grid from "../Grid/Grid";
 import { isGameOver } from "../../ai/rewardUtils";
+import { REWARD_WEIGHTS } from "../../ai/rewardUtils";
+import type { RewardWeights } from "../../ai/rewardUtils";
 import { getRandomFunnyName } from "../../utils/funnyNames";
 import styles from "./styles.module.css";
 
@@ -27,6 +29,39 @@ const LEADERBOARD_KEY = "2048-leaderboard";
 const STATS_KEY = "2048-arena-stats";
 const MAX_LEADERBOARD = 10;
 const MAX_WORKERS = 16;
+
+/**
+ * Random perturbation magnitude for reward weights (±40 %).
+ * Each arena slot starts with a slightly different weight configuration so
+ * that the population explores the weight-hyperparameter space in parallel.
+ * Whenever a slot achieves a new overall high score its weights are adopted
+ * as the new base for the next generation of slots.
+ */
+const PERTURB_MAGNITUDE = 0.4;
+
+/**
+ * Returns a copy of `base` where every weight is randomly perturbed by up to
+ * ±`PERTURB_MAGNITUDE × 100` %.  Floors keep values in a sensible range.
+ */
+function perturbWeights(base: RewardWeights): RewardWeights {
+  const p = (v: number) =>
+    Math.max(0.1, v * (1 + (Math.random() * 2 - 1) * PERTURB_MAGNITUDE));
+  // gameOverPenalty is negative; perturb its magnitude, then negate.
+  const penaltyMagnitude = Math.abs(base.gameOverPenalty);
+  const perturbedPenalty = -Math.max(
+    0.5,
+    penaltyMagnitude * (1 + (Math.random() * 2 - 1) * PERTURB_MAGNITUDE),
+  );
+  return {
+    mergeBonus: p(base.mergeBonus),
+    emptyTiles: p(base.emptyTiles),
+    monotonicity: p(base.monotonicity),
+    cornerBonus: p(base.cornerBonus),
+    smoothness: p(base.smoothness),
+    maxTileBonus: p(base.maxTileBonus),
+    gameOverPenalty: perturbedPenalty,
+  };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,13 +117,16 @@ interface ArenaGameSlotProps {
   /** Stable ID so the worker is created once and never torn down by key changes. */
   id: number;
   autoRestart: boolean;
-  onGameOver: (score: number, saveAsBest: () => void) => void;
+  /** Per-slot reward weights used by this worker's experience replay. */
+  rewardWeights: RewardWeights;
+  onGameOver: (score: number, saveAsBest: () => void, weights: RewardWeights) => void;
   onTrainStep: () => void;
 }
 
 const ArenaGameSlot = memo(function ArenaGameSlot({
   id,
   autoRestart,
+  rewardWeights,
   onGameOver,
   onTrainStep,
 }: ArenaGameSlotProps) {
@@ -124,9 +162,9 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
 
   const handleGameOver = useCallback(
     (finalScore: number, saveAsBest: () => void) => {
-      onGameOver(finalScore, saveAsBest);
+      onGameOver(finalScore, saveAsBest, rewardWeights);
     },
-    [onGameOver],
+    [onGameOver, rewardWeights],
   );
 
   const { aiEnabled, toggleAi, workerReady, saveAsBest } = useAiPlayer(
@@ -137,6 +175,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
       onGameOver: (s) => handleGameOver(s, saveAsBest),
       onTrainStep,
       restartTrigger: restartCount,
+      rewardWeights,
     },
   );
 
@@ -194,6 +233,32 @@ export default function AiArena() {
 
   const [stats, setStats] = useState<ArenaStats>(loadStats);
 
+  // ── Reward-weight evolution ────────────────────────────────────────────────
+  // Each slot starts with a randomly perturbed copy of the current best weights.
+  // When a slot achieves a new overall high score its weights become the new
+  // base so subsequent slots explore the nearby hyperparameter neighbourhood.
+  const [bestWeights, setBestWeights] = useState<RewardWeights>(
+    () => ({ ...REWARD_WEIGHTS }),
+  );
+  const bestWeightsRef = useRef(bestWeights);
+  useEffect(() => {
+    bestWeightsRef.current = bestWeights;
+  }, [bestWeights]);
+
+  // Stable per-slot weight arrays.  Initialised on mount with perturbed defaults
+  // and regenerated (from the latest best weights) on every full restart.
+  const [slotWeights, setSlotWeights] = useState<RewardWeights[]>(() =>
+    Array.from({ length: MAX_WORKERS }, () => perturbWeights(REWARD_WEIGHTS)),
+  );
+
+  // Regenerate weights when the user triggers a full restart so each new slot
+  // generation explores a different neighbourhood around the best-known weights.
+  useEffect(() => {
+    setSlotWeights(
+      Array.from({ length: MAX_WORKERS }, () => perturbWeights(bestWeightsRef.current)),
+    );
+  }, [restartTrigger]);
+
   // Persist stats whenever they change
   useEffect(() => {
     saveStats(stats);
@@ -205,13 +270,16 @@ export default function AiArena() {
   }, [leaderboard]);
 
   const handleGameOver = useCallback(
-    (score: number, saveAsBest: () => void) => {
+    (score: number, saveAsBest: () => void, slotWeights: RewardWeights) => {
       // Functional update ensures concurrent game-overs from multiple workers
       // are queued and processed sequentially without losing counts.
       setStats((prev) => ({ ...prev, totalModels: prev.totalModels + 1 }));
       if (score > bestScoreRef.current) {
         bestScoreRef.current = score;
         saveAsBest();
+        // Evolutionary step: winner's weights become the new base so the next
+        // generation of slots explores the surrounding hyperparameter region.
+        setBestWeights(slotWeights);
       }
       if (score === 0) return; // Skip trivial scores
       const entry: LeaderboardEntry = {
@@ -290,6 +358,32 @@ export default function AiArena() {
             Iterations: {stats.totalIterations.toLocaleString()}
           </span>
         </div>
+
+        {/* Best weights display – updates whenever a new high-score worker wins */}
+        <div className={styles.controlGroup}>
+          <span className={styles.controlLabel}>🧬 Best weights</span>
+          <span className={styles.controlLabel} title="merge bonus">
+            merge={bestWeights.mergeBonus.toFixed(2)}
+          </span>
+          <span className={styles.controlLabel} title="empty tiles">
+            empty={bestWeights.emptyTiles.toFixed(2)}
+          </span>
+          <span className={styles.controlLabel} title="monotonicity">
+            mono={bestWeights.monotonicity.toFixed(2)}
+          </span>
+          <span className={styles.controlLabel} title="corner bonus">
+            corner={bestWeights.cornerBonus.toFixed(2)}
+          </span>
+          <span className={styles.controlLabel} title="smoothness">
+            smooth={bestWeights.smoothness.toFixed(2)}
+          </span>
+          <span className={styles.controlLabel} title="max tile bonus">
+            maxTile={bestWeights.maxTileBonus.toFixed(2)}
+          </span>
+          <span className={styles.controlLabel} title="game-over penalty">
+            gameover={bestWeights.gameOverPenalty.toFixed(2)}
+          </span>
+        </div>
       </div>
 
       {/* ── Game grid ── */}
@@ -306,6 +400,7 @@ export default function AiArena() {
             key={`${id}-${restartTrigger}`}
             id={id}
             autoRestart={autoRestart}
+            rewardWeights={slotWeights[id] ?? { ...REWARD_WEIGHTS }}
             onGameOver={handleGameOver}
             onTrainStep={handleTrainStep}
           />

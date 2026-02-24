@@ -130,6 +130,33 @@ describe("calculateReward", () => {
     const rDone = calculateReward(baseCells, baseCells, 0, 0, true);
     expect(rDone).toBeLessThan(r);
   });
+
+  test("custom weights are used instead of defaults when provided", () => {
+    // A weight set with a huge merge bonus and zero for everything else
+    const mergeHeavy = {
+      mergeBonus: 100.0,
+      emptyTiles: 0,
+      monotonicity: 0,
+      cornerBonus: 0,
+      smoothness: 0,
+      maxTileBonus: 0,
+      gameOverPenalty: 0,
+    };
+    // Use distinct prev/next cells so no stagnation penalty is applied.
+    // Score delta of 4 → log₂(4)/17 × 100 ≈ 11.76
+    const beforeCells = [cell(1, 0, 0, 2), cell(2, 1, 0, 2)];
+    const afterCells = [cell(3, 0, 0, 4)];
+    const r = calculateReward(beforeCells, afterCells, 0, 4, false, mergeHeavy);
+    expect(r).toBeCloseTo((Math.log2(4) / 17) * 100);
+  });
+
+  test("custom weights: heavier game-over penalty produces lower done reward", () => {
+    const softPenalty = { ...REWARD_WEIGHTS, gameOverPenalty: -1 };
+    const hardPenalty = { ...REWARD_WEIGHTS, gameOverPenalty: -50 };
+    const rSoft = calculateReward(baseCells, baseCells, 0, 0, true, softPenalty);
+    const rHard = calculateReward(baseCells, baseCells, 0, 0, true, hardPenalty);
+    expect(rHard).toBeLessThan(rSoft);
+  });
 });
 
 /** Build a 4×4 board where every cell is filled with distinct non-adjacent values (no merges possible). */

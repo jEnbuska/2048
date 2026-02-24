@@ -3,7 +3,23 @@ import type { Cell } from "../types";
 import { countEmptyCells } from "./encoding";
 
 /**
- * Weights used when computing the composite reward signal.
+ * Shape of the reward-weight configuration.
+ * Exported so that callers can construct and pass custom weight sets
+ * (e.g. for per-worker perturbation during runtime tuning).
+ */
+export interface RewardWeights {
+  mergeBonus: number;
+  emptyTiles: number;
+  monotonicity: number;
+  cornerBonus: number;
+  smoothness: number;
+  maxTileBonus: number;
+  /** Should be negative – applied when the episode ends. */
+  gameOverPenalty: number;
+}
+
+/**
+ * Default weights used when computing the composite reward signal.
  * These can be tuned during the heuristic-tuning phase.
  *
  * Rationale for values:
@@ -19,7 +35,7 @@ import { countEmptyCells } from "./encoding";
  *  gameOverPenalty – increased 5× in magnitude; terminal state should
  *                  be far more costly than any single good move.
  */
-export const REWARD_WEIGHTS = {
+export const REWARD_WEIGHTS: RewardWeights = {
   mergeBonus: 2.0,
   emptyTiles: 2.0,
   monotonicity: 1.5,
@@ -27,7 +43,7 @@ export const REWARD_WEIGHTS = {
   smoothness: 1.0,
   maxTileBonus: 1.0,
   gameOverPenalty: -5.0,
-} as const;
+};
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -194,6 +210,7 @@ export function isGameOver(cells: Cell[]): boolean {
  *        − gameOverPenalty (applied when the episode ends)
  *
  * All components are normalised to roughly the same magnitude before weighting.
+ * Pass a custom `weights` object to use per-worker tuned weight sets.
  */
 export function calculateReward(
   prevCells: Cell[],
@@ -201,19 +218,20 @@ export function calculateReward(
   prevScore: number,
   nextScore: number,
   done = false,
+  weights: RewardWeights = REWARD_WEIGHTS,
 ): number {
   const scoreDelta = nextScore - prevScore;
   const mergeBonus =
-    scoreDelta > 0 ? (Math.log2(scoreDelta) / 17) * REWARD_WEIGHTS.mergeBonus : 0;
+    scoreDelta > 0 ? (Math.log2(scoreDelta) / 17) * weights.mergeBonus : 0;
 
   const emptyCount = countEmptyCells(nextCells);
   const emptyBonus =
-    (emptyCount / (GRID_SIZE * GRID_SIZE)) * REWARD_WEIGHTS.emptyTiles;
+    (emptyCount / (GRID_SIZE * GRID_SIZE)) * weights.emptyTiles;
 
-  const mono = calculateMonotonicity(nextCells) * REWARD_WEIGHTS.monotonicity;
-  const corner = calculateCornerBonus(nextCells) * REWARD_WEIGHTS.cornerBonus;
-  const smooth = calculateSmoothness(nextCells) * REWARD_WEIGHTS.smoothness;
-  const maxTile = calculateMaxTileBonus(nextCells) * REWARD_WEIGHTS.maxTileBonus;
+  const mono = calculateMonotonicity(nextCells) * weights.monotonicity;
+  const corner = calculateCornerBonus(nextCells) * weights.cornerBonus;
+  const smooth = calculateSmoothness(nextCells) * weights.smoothness;
+  const maxTile = calculateMaxTileBonus(nextCells) * weights.maxTileBonus;
 
   // Small penalty when the board state didn't change (wasted move).
   // Compare active-cell positions and values rather than relying on reference equality.
@@ -228,7 +246,7 @@ export function calculateReward(
     .sort()
     .join("|");
   const stagnationPenalty = prevKey === nextKey ? -0.5 : 0;
-  const gameOverPenalty = done ? REWARD_WEIGHTS.gameOverPenalty : 0;
+  const gameOverPenalty = done ? weights.gameOverPenalty : 0;
 
   return mergeBonus + emptyBonus + mono + corner + smooth + maxTile + stagnationPenalty + gameOverPenalty;
 }

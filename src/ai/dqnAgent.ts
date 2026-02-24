@@ -111,12 +111,15 @@ export interface DQNConfig {
   batchSize?: number;
   /** Discount factor γ for future rewards. */
   gamma?: number;
-  /** Initial exploration rate ε. */
+  /** Initial exploration rate ε (default 1.0 – fully random at start). */
   epsilonStart?: number;
-  /** Minimum exploration rate. */
-  epsilonEnd?: number;
-  /** Multiplicative decay applied after each gradient step. */
-  epsilonDecay?: number;
+  /**
+   * Number of gradient steps over which ε is linearly annealed from
+   * `epsilonStart` to 0.  After this many steps the agent acts purely
+   * greedily, having exhausted its exploration budget.
+   * Default: 50 000.
+   */
+  epsilonDecaySteps?: number;
   /** Copy policy → target network every N steps. */
   targetUpdateFrequency?: number;
 }
@@ -131,16 +134,16 @@ export class DQNAgent {
 
   readonly batchSize: number;
   readonly gamma: number;
-  readonly epsilonEnd: number;
-  readonly epsilonDecay: number;
+  readonly epsilonStart: number;
+  readonly epsilonDecaySteps: number;
   readonly targetUpdateFrequency: number;
 
   constructor(config: DQNConfig = {}) {
     this.batchSize = config.batchSize ?? 64;
     this.gamma = config.gamma ?? 0.99;
-    this.epsilon = config.epsilonStart ?? 1.0;
-    this.epsilonEnd = config.epsilonEnd ?? 0.05;
-    this.epsilonDecay = config.epsilonDecay ?? 0.9995;
+    this.epsilonStart = config.epsilonStart ?? 1.0;
+    this.epsilonDecaySteps = config.epsilonDecaySteps ?? 50_000;
+    this.epsilon = this.epsilonStart;
     this.targetUpdateFrequency = config.targetUpdateFrequency ?? 500;
 
     this.policy = buildModel();
@@ -276,12 +279,14 @@ export class DQNAgent {
     tf.dispose(grads.grads);
     loss.dispose();
 
-    // Decay epsilon
-    this.epsilon = Math.max(
-      this.epsilonEnd,
-      this.epsilon * this.epsilonDecay,
-    );
+    // Linear epsilon decay: ε = epsilonStart × (1 − steps / epsilonDecaySteps)
+    // Reaches exactly 0 after `epsilonDecaySteps` gradient updates, giving the
+    // agent maximum exploration early and pure greedy play afterwards.
     this.steps++;
+    this.epsilon = Math.max(
+      0,
+      this.epsilonStart * (1 - this.steps / this.epsilonDecaySteps),
+    );
 
     // Periodically sync target network
     if (this.steps % this.targetUpdateFrequency === 0) {
