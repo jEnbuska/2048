@@ -16,6 +16,8 @@ const POLICY_MODEL_KEY = "2048-dqn-policy";
 export interface UseAiPlayerOptions {
   /** Called once when the board reaches a game-over state. */
   onGameOver?: (score: number) => void;
+  /** Called after each completed training step (TRAIN_RESULT received). */
+  onTrainStep?: () => void;
   /**
    * Increment this value to trigger an immediate game reset inside the hook
    * (clears pending experiences and reschedules the next move).
@@ -92,6 +94,11 @@ export default function useAiPlayer(
   useEffect(() => {
     onGameOverRef.current = options.onGameOver;
   }, [options.onGameOver]);
+
+  const onTrainStepRef = useRef(options.onTrainStep);
+  useEffect(() => {
+    onTrainStepRef.current = options.onTrainStep;
+  }, [options.onTrainStep]);
 
   // Queue of experiences waiting for the cells to update before being sent
   const pendingExpsRef = useRef<PendingExp[]>([]);
@@ -180,6 +187,7 @@ export default function useAiPlayer(
 
         case "TRAIN_RESULT":
           trainStepCountRef.current++;
+          onTrainStepRef.current?.();
           if (trainStepCountRef.current % SAVE_EVERY === 0) {
             worker.postMessage({
               type: "SAVE_MODEL",

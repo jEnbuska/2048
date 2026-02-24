@@ -24,10 +24,35 @@ export interface LeaderboardEntry {
 }
 
 const LEADERBOARD_KEY = "2048-leaderboard";
+const STATS_KEY = "2048-arena-stats";
 const MAX_LEADERBOARD = 10;
 const MAX_WORKERS = 16;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+interface ArenaStats {
+  totalModels: number;
+  totalIterations: number;
+}
+
+function loadStats(): ArenaStats {
+  try {
+    const raw = localStorage.getItem(STATS_KEY);
+    return raw
+      ? (JSON.parse(raw) as ArenaStats)
+      : { totalModels: 0, totalIterations: 0 };
+  } catch {
+    return { totalModels: 0, totalIterations: 0 };
+  }
+}
+
+function saveStats(stats: ArenaStats) {
+  try {
+    localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function createGameState() {
   const initialCells = addNewCell([]);
@@ -58,12 +83,14 @@ interface ArenaGameSlotProps {
   id: number;
   autoRestart: boolean;
   onGameOver: (score: number, saveAsBest: () => void) => void;
+  onTrainStep: () => void;
 }
 
 const ArenaGameSlot = memo(function ArenaGameSlot({
   id,
   autoRestart,
   onGameOver,
+  onTrainStep,
 }: ArenaGameSlotProps) {
   const [{ cells, score }, setState] = useState(createGameState);
   const [restartCount, setRestartCount] = useState(0);
@@ -108,6 +135,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
     updateStateByVector,
     {
       onGameOver: (s) => handleGameOver(s, saveAsBest),
+      onTrainStep,
       restartTrigger: restartCount,
     },
   );
@@ -164,6 +192,13 @@ export default function AiArena() {
     leaderboard.length > 0 ? leaderboard[0].score : 0,
   );
 
+  const [stats, setStats] = useState<ArenaStats>(loadStats);
+
+  // Persist stats whenever they change
+  useEffect(() => {
+    saveStats(stats);
+  }, [stats]);
+
   // Persist leaderboard whenever it changes
   useEffect(() => {
     saveLeaderboard(leaderboard);
@@ -171,6 +206,9 @@ export default function AiArena() {
 
   const handleGameOver = useCallback(
     (score: number, saveAsBest: () => void) => {
+      // Functional update ensures concurrent game-overs from multiple workers
+      // are queued and processed sequentially without losing counts.
+      setStats((prev) => ({ ...prev, totalModels: prev.totalModels + 1 }));
       if (score > bestScoreRef.current) {
         bestScoreRef.current = score;
         saveAsBest();
@@ -190,6 +228,15 @@ export default function AiArena() {
     },
     [],
   );
+
+  const handleTrainStep = useCallback(() => {
+    // Functional update ensures concurrent TRAIN_RESULT messages from multiple
+    // workers are queued and processed sequentially without losing counts.
+    setStats((prev) => ({
+      ...prev,
+      totalIterations: prev.totalIterations + 1,
+    }));
+  }, []);
 
   const restartAll = useCallback(() => {
     setRestartTrigger((t) => t + 1);
@@ -234,6 +281,15 @@ export default function AiArena() {
             {autoRestart ? "⟳ Auto-restart ON" : "⟳ Auto-restart OFF"}
           </button>
         </div>
+
+        <div className={styles.controlGroup}>
+          <span className={styles.controlLabel}>
+            Models: {stats.totalModels.toLocaleString()}
+          </span>
+          <span className={styles.controlLabel}>
+            Iterations: {stats.totalIterations.toLocaleString()}
+          </span>
+        </div>
       </div>
 
       {/* ── Game grid ── */}
@@ -251,6 +307,7 @@ export default function AiArena() {
             id={id}
             autoRestart={autoRestart}
             onGameOver={handleGameOver}
+            onTrainStep={handleTrainStep}
           />
         ))}
       </div>
