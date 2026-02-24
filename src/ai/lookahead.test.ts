@@ -3,6 +3,7 @@ import {
   boardHeuristicValue,
   computeLookaheadScores,
   computeDirectionBias,
+  selectLookaheadAction,
   LOOKAHEAD_DEPTH,
   LOOKAHEAD_DISCOUNT,
   LOOKAHEAD_WEIGHT,
@@ -249,5 +250,32 @@ describe("computeDirectionBias", () => {
     // Chain tail is at (1,0) – row 0 – so default Up bias should apply.
     expect(bias[0]).toBe(DIRECTION_BIAS); // Up
     expect(bias[1]).toBe(0);              // not Down
+  });
+});
+
+// ─── selectLookaheadAction ────────────────────────────────────────────────────
+
+describe("selectLookaheadAction", () => {
+  test("returns the index of the highest finite score", () => {
+    // Index 2 (Left) has the highest value.
+    expect(selectLookaheadAction([1, 2, 10, 3])).toBe(2);
+  });
+
+  test("ignores -Infinity (no-op) scores when a better option exists", () => {
+    // Indices 0 and 3 are no-ops; best finite score is index 1.
+    expect(selectLookaheadAction([-Infinity, 7, -Infinity, 5])).toBe(1);
+  });
+
+  test("returns 0 when all scores are -Infinity (degenerate board)", () => {
+    // Nothing is finite – falls back to index 0 (the initialised bestIdx).
+    expect(selectLookaheadAction([-Infinity, -Infinity, -Infinity, -Infinity])).toBe(0);
+  });
+
+  test("handles negative finite scores and picks the least-bad action", () => {
+    expect(selectLookaheadAction([-5, -10, -3, -8])).toBe(2);
+  });
+
+  test("works with a single valid action among no-ops", () => {
+    expect(selectLookaheadAction([-Infinity, -Infinity, -Infinity, 42])).toBe(3);
   });
 });

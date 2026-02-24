@@ -33,7 +33,7 @@ import * as tf from "@tensorflow/tfjs"; // registers WebGL / CPU backend
 import { DQNAgent, ACTIONS } from "./dqnAgent";
 import type { DQNConfig } from "./dqnAgent";
 import { encodeBoardFlat, countEmptyCells } from "./encoding";
-import { computeLookaheadScores, LOOKAHEAD_WEIGHT } from "./lookahead";
+import { computeLookaheadScores, LOOKAHEAD_WEIGHT, selectLookaheadAction } from "./lookahead";
 import { calculateReward, isGameOver, REWARD_WEIGHTS } from "./rewardUtils";
 import type { RewardWeights } from "./rewardUtils";
 import tilt from "../utils/tilt";
@@ -67,6 +67,18 @@ export type WorkerOutMessage =
 
 /** Auto-save the policy model every this many training steps. */
 const SAVE_EVERY = 20;
+
+/**
+ * Number of initial game steps in which the pure lookahead solver acts as
+ * teacher, seeding the replay buffer with high-quality expert demonstrations
+ * before epsilon-greedy exploration begins.
+ *
+ * During this phase every action is chosen by `selectLookaheadAction` (no
+ * randomness), so the first experiences stored in replay memory are the best
+ * the heuristic can produce.  After this many steps the agent switches to the
+ * normal blended epsilon-greedy policy.
+ */
+const DEMO_PHASE_STEPS = 2_000;
 
 /**
  * Minimum milliseconds between DISPLAY messages sent to React in speed mode.
@@ -132,9 +144,15 @@ async function runStep() {
   const prevScore = score;
 
   // Pick an action.
+  // During the demo phase the pure lookahead solver acts as teacher so that
+  // the replay buffer is seeded with high-quality expert demonstrations.
+  // After the demo phase the normal blended epsilon-greedy policy takes over.
   const flat = encodeBoardFlat(cells);
   const lookaheadScores = computeLookaheadScores(cells);
-  const actionIndex = agent.selectActionBlended(flat, lookaheadScores, LOOKAHEAD_WEIGHT);
+  const actionIndex =
+    trainStepCount < DEMO_PHASE_STEPS
+      ? selectLookaheadAction(lookaheadScores)
+      : agent.selectActionBlended(flat, lookaheadScores, LOOKAHEAD_WEIGHT);
   const direction = ACTIONS[actionIndex];
   const vector = get2DVectorByTiltDirection(direction);
 

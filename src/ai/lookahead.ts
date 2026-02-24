@@ -187,6 +187,35 @@ function lookaheadValue(cells: Cell[], depth: number): number {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
+ * Returns the index of the action with the highest finite lookahead score.
+ *
+ * Used during the demonstration phase so the lookahead solver acts as a
+ * pure expert teacher: it always picks the best valid move without any
+ * epsilon-greedy randomness.  No-op actions (score === -Infinity) are
+ * automatically excluded.
+ *
+ * When *all* scores are -Infinity (fully stuck board / game over), the
+ * function returns 0 as a fallback.  The caller is expected to detect the
+ * resulting no-op move and check `isGameOver()` – which is exactly what
+ * `runStep` already does (matching the degenerate-board behaviour of
+ * `selectActionBlended`).
+ *
+ * @param scores  Per-action scores as returned by `computeLookaheadScores`.
+ * @returns Index into ACTIONS [0–3] of the best valid action.
+ */
+export function selectLookaheadAction(scores: number[]): number {
+  let bestIdx = 0;
+  let best = -Infinity;
+  for (let i = 0; i < scores.length; i++) {
+    if (isFinite(scores[i]) && scores[i] > best) {
+      best = scores[i];
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+/**
  * Computes a per-action lookahead score for each of the 4 directions.
  *
  * For each action the function simulates the resulting board state, evaluates
