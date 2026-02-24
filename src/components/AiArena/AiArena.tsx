@@ -296,13 +296,15 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
   }, [workerReady, toggleAi]);
 
   // Auto-restart when the game ends (if autoRestart is on).
+  // In speed mode there is no visual benefit to waiting – restart immediately
+  // so training games cycle without an 800 ms idle gap between them.
   useEffect(() => {
     if (!autoRestart || !gameOver) return;
     const timer = setTimeout(() => {
       resetGame();
-    }, 800);
+    }, speedMode ? 0 : 800);
     return () => clearTimeout(timer);
-  }, [gameOver, autoRestart, resetGame]);
+  }, [gameOver, autoRestart, resetGame, speedMode]);
 
   const sortedCells = displayCells.slice().sort((a, b) => a.id - b.id);
 

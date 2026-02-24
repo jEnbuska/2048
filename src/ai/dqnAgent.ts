@@ -41,7 +41,7 @@ export class ReplayMemory {
   private index = 0;
   readonly capacity: number;
 
-  constructor(capacity: number = 10_000) {
+  constructor(capacity: number = 50_000) {
     this.capacity = capacity;
   }
 
