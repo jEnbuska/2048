@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Cell } from "../../types";
 import styles from "./styles.module.css";
 import GridCell from "../GridCell/GridCell";
@@ -8,7 +9,7 @@ type OwnProps = {
   cells: Cell[];
 };
 
-const Grid = ({ cells }: OwnProps) => {
+const Grid = memo(({ cells }: OwnProps) => {
   return (
     <div className={styles.grid}>
       {range(GRID_SIZE ** 2).map((n) => (
@@ -19,6 +20,8 @@ const Grid = ({ cells }: OwnProps) => {
       })}
     </div>
   );
-};
+});
+
+Grid.displayName = "Grid";
 
 export default Grid;

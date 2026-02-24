@@ -33,14 +33,14 @@
 }
 
 .cell-2 {
-  --cell-background-color: #eee4da;
-  --cell-text-color: #786e65;
+  --cell-background-color: #3d3028;
+  --cell-text-color: #c8b8ac;
   --cell-font-size: var(--cell-font-size-xl);
 }
 
 .cell-4 {
-  --cell-background-color: #ede0c9;
-  --cell-text-color: #786e65;
+  --cell-background-color: #4a3820;
+  --cell-text-color: #c8b8ac;
   --cell-font-size: var(--cell-font-size-xl);
 }
 

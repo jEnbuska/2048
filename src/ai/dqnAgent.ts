@@ -41,7 +41,7 @@ export class ReplayMemory {
   private index = 0;
   readonly capacity: number;
 
-  constructor(capacity: number = 10_000) {
+  constructor(capacity: number = 50_000) {
     this.capacity = capacity;
   }
 
@@ -111,12 +111,21 @@ export interface DQNConfig {
   batchSize?: number;
   /** Discount factor γ for future rewards. */
   gamma?: number;
-  /** Initial exploration rate ε. */
+  /** Initial exploration rate ε (default 1.0 – fully random at start). */
   epsilonStart?: number;
-  /** Minimum exploration rate. */
-  epsilonEnd?: number;
-  /** Multiplicative decay applied after each gradient step. */
-  epsilonDecay?: number;
+  /**
+   * Number of gradient steps over which ε is linearly annealed from
+   * `epsilonStart` to `epsilonMin`.  After this many steps the agent acts
+   * with minimal exploration, having exhausted its main exploration budget.
+   * Default: 50 000.
+   */
+  epsilonDecaySteps?: number;
+  /**
+   * Minimum exploration rate ε that the agent never falls below.
+   * Keeping a small floor (default 0.05) prevents the agent from converging
+   * to a fully greedy policy that can no longer escape local optima.
+   */
+  epsilonMin?: number;
   /** Copy policy → target network every N steps. */
   targetUpdateFrequency?: number;
 }
@@ -131,23 +140,25 @@ export class DQNAgent {
 
   readonly batchSize: number;
   readonly gamma: number;
-  readonly epsilonEnd: number;
-  readonly epsilonDecay: number;
+  readonly epsilonStart: number;
+  readonly epsilonMin: number;
+  readonly epsilonDecaySteps: number;
   readonly targetUpdateFrequency: number;
 
   constructor(config: DQNConfig = {}) {
     this.batchSize = config.batchSize ?? 64;
     this.gamma = config.gamma ?? 0.99;
-    this.epsilon = config.epsilonStart ?? 1.0;
-    this.epsilonEnd = config.epsilonEnd ?? 0.05;
-    this.epsilonDecay = config.epsilonDecay ?? 0.9995;
+    this.epsilonStart = config.epsilonStart ?? 1.0;
+    this.epsilonMin = config.epsilonMin ?? 0.05;
+    this.epsilonDecaySteps = config.epsilonDecaySteps ?? 50_000;
+    this.epsilon = this.epsilonStart;
     this.targetUpdateFrequency = config.targetUpdateFrequency ?? 500;
 
     this.policy = buildModel();
     this.target = buildModel();
     this.syncTargetNetwork();
 
-    this.memory = new ReplayMemory(config.memoryCapacity ?? 10_000);
+    this.memory = new ReplayMemory(config.memoryCapacity ?? 50_000);
   }
 
   // ── Exploration ──────────────────────────────────────────────────────────
@@ -175,6 +186,84 @@ export class DQNAgent {
     const flat = encodeBoardFlat(cells);
     const index = this.selectAction(flat);
     return ACTIONS[index];
+  }
+
+  /**
+   * Blended epsilon-greedy action selection.
+   *
+   * Combines the DQN's Q-values with caller-supplied per-action scores
+   * (e.g. from a lookahead search) using a configurable blend weight.
+   *
+   * During exploration (ε-greedy random phase) the selection is restricted to
+   * actions that the external scores consider valid (finite score), so the
+   * agent avoids obvious no-op moves even while exploring.
+   *
+   * During exploitation the DQN Q-values and the external scores are each
+   * normalised independently to [0, 1] before being linearly combined:
+   *
+   *   combined[i] = (1 − blendWeight) × qNorm[i] + blendWeight × extNorm[i]
+   *
+   * The action with the highest combined score is returned.
+   *
+   * @param stateTensor    Pre-encoded board as Float32Array (length 272).
+   * @param externalScores Per-action external scores (e.g. lookahead). Use
+   *                       -Infinity for actions that should be avoided.
+   * @param blendWeight    Weight of external scores in [0, 1]; 0 = pure DQN.
+   * @returns Index into ACTIONS [0–3].
+   */
+  selectActionBlended(
+    stateTensor: Float32Array,
+    externalScores: number[],
+    blendWeight = 0.6,
+  ): number {
+    if (Math.random() < this.epsilon) {
+      // Prefer valid (non-no-op) actions during random exploration.
+      const validIndices = externalScores
+        .map((s, i) => (isFinite(s) ? i : -1))
+        .filter((i) => i >= 0);
+      if (validIndices.length > 0) {
+        return validIndices[Math.floor(Math.random() * validIndices.length)];
+      }
+      return Math.floor(Math.random() * NUM_ACTIONS);
+    }
+
+    return tf.tidy(() => {
+      const input = tf.tensor4d(stateTensor, [1, ...INPUT_SHAPE]);
+      const qTensor = this.policy.predict(input) as tf.Tensor;
+      const qValues = Array.from(qTensor.dataSync() as Float32Array);
+
+      // Normalise Q-values to [0, 1].
+      const qMin = Math.min(...qValues);
+      const qMax = Math.max(...qValues);
+      const qRange = qMax - qMin || 1;
+      const qNorm = qValues.map((q) => (q - qMin) / qRange);
+
+      // Normalise finite external scores to [0, 1]; invalid actions get -1.
+      const finite = externalScores.filter((v) => isFinite(v));
+
+      // If no valid actions exist (all no-ops, game stuck), fall back to pure
+      // DQN greedy selection to avoid degenerate blending behaviour.
+      if (finite.length === 0) {
+        return qNorm.indexOf(Math.max(...qNorm));
+      }
+
+      const extMin = Math.min(...finite);
+      const extMax = Math.max(...finite);
+      const extRange = extMax - extMin || 1;
+      const extNorm = externalScores.map((v) =>
+        isFinite(v) ? (v - extMin) / extRange : -1,
+      );
+
+      // Blend and pick the best action.
+      // Invalid actions (extNorm === -1) are set to -Infinity so they can
+      // never be selected during exploitation, regardless of their Q-value.
+      const combined = qNorm.map((q, i) =>
+        isFinite(externalScores[i])
+          ? (1 - blendWeight) * q + blendWeight * extNorm[i]
+          : -Infinity,
+      );
+      return combined.indexOf(Math.max(...combined));
+    });
   }
 
   // ── Memory ───────────────────────────────────────────────────────────────
@@ -276,12 +365,15 @@ export class DQNAgent {
     tf.dispose(grads.grads);
     loss.dispose();
 
-    // Decay epsilon
-    this.epsilon = Math.max(
-      this.epsilonEnd,
-      this.epsilon * this.epsilonDecay,
-    );
+    // Linear epsilon decay: ε decays from epsilonStart down to epsilonMin
+    // over epsilonDecaySteps gradient updates.  The floor ensures the agent
+    // never stops exploring entirely, preventing it from getting stuck in a
+    // local greedy policy after the main exploration budget is exhausted.
     this.steps++;
+    this.epsilon = Math.max(
+      this.epsilonMin,
+      this.epsilonStart * (1 - this.steps / this.epsilonDecaySteps),
+    );
 
     // Periodically sync target network
     if (this.steps % this.targetUpdateFrequency === 0) {
@@ -296,7 +388,6 @@ export class DQNAgent {
   syncTargetNetwork(): void {
     const pWeights = this.policy.getWeights();
     this.target.setWeights(pWeights);
-    pWeights.forEach((w) => w.dispose());
   }
 
   // ── Persistence ──────────────────────────────────────────────────────────
