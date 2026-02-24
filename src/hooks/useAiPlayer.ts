@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Cell, Coordinate, TiltDirection } from "../types";
 import get2DVectorByTiltDirection from "../utils/get2DVectorByTiltDirection";
 import type { WorkerInMessage, WorkerOutMessage } from "../ai/aiWorker";
-import { encodeBoardFlat, countEmptyCells } from "../ai/encoding";
-import { calculateReward } from "../ai/rewardUtils";
+import { encodeBoardFlat } from "../ai/encoding";
+import { calculateReward, isGameOver } from "../ai/rewardUtils";
 
 /** Interval between AI moves in milliseconds. */
 const AI_MOVE_INTERVAL_MS = 500;
@@ -168,10 +168,8 @@ export default function useAiPlayer(
 
       const state = encodeBoardFlat(exp.prevCells);
       const nextState = encodeBoardFlat(cells);
-      const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score);
-      // done = true when the board is completely full; the game will be stuck on the
-      // next turn since addNewCell cannot place a tile (full-board game-over proxy).
-      const done = countEmptyCells(cells) === 0;
+      const done = isGameOver(cells);
+      const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score, done);
 
       worker.postMessage({
         type: "REMEMBER",

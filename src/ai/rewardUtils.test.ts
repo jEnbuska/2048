@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { calculateMonotonicity, calculateCornerBonus, calculateReward } from "./rewardUtils";
+import { calculateMonotonicity, calculateCornerBonus, calculateReward, isGameOver } from "./rewardUtils";
 import { GRID_SIZE } from "../constants";
 import type { Cell } from "../types";
 
@@ -115,5 +115,57 @@ describe("calculateReward", () => {
     const smallMerge = calculateReward(baseCells, baseCells, 0, 4);   // merged two 2s
     const largeMerge = calculateReward(baseCells, baseCells, 0, 256); // merged two 128s
     expect(largeMerge).toBeGreaterThan(smallMerge);
+  });
+
+  test("game-over penalty: done=true gives lower reward than done=false", () => {
+    const r = calculateReward(baseCells, baseCells, 0, 0, false);
+    const rDone = calculateReward(baseCells, baseCells, 0, 0, true);
+    expect(rDone).toBeLessThan(r);
+  });
+});
+
+/** Build a 4×4 board where every cell is filled with distinct non-adjacent values (no merges possible). */
+function deadlockBoard(): Cell[] {
+  // Checkerboard of alternating 2 and 4 – no two equal tiles are adjacent
+  const cells: Cell[] = [];
+  let id = 100;
+  for (let y = 0; y < GRID_SIZE; y++) {
+    for (let x = 0; x < GRID_SIZE; x++) {
+      const value = (x + y) % 2 === 0 ? 2 : 4;
+      cells.push(cell(id++, x, y, value));
+    }
+  }
+  return cells;
+}
+
+describe("isGameOver", () => {
+  test("returns false when board has empty cells", () => {
+    const cells = [cell(1, 0, 0, 2), cell(2, 1, 0, 4)];
+    expect(isGameOver(cells)).toBe(false);
+  });
+
+  test("returns false when board is full but adjacent equal tiles exist", () => {
+    // Fill the board with all 2s – every tile can merge
+    const cells: Cell[] = [];
+    let id = 1;
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        cells.push(cell(id++, x, y, 2));
+      }
+    }
+    expect(isGameOver(cells)).toBe(false);
+  });
+
+  test("returns true when board is full and no adjacent equal tiles exist", () => {
+    expect(isGameOver(deadlockBoard())).toBe(true);
+  });
+
+  test("ignores consumed cells when checking fullness", () => {
+    // A board that looks full via consumed cells but actually has empty space
+    const cells = [
+      cell(1, 0, 0, 2),
+      { ...cell(2, 0, 0, 2), consumedBy: 1 }, // consumed – same position, not really occupying
+    ];
+    expect(isGameOver(cells)).toBe(false);
   });
 });

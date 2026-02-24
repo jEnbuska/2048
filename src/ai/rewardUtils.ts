@@ -11,6 +11,7 @@ export const REWARD_WEIGHTS = {
   emptyTiles: 2.7,
   monotonicity: 1.0,
   cornerBonus: 3.0,
+  gameOverPenalty: -1.0,
 } as const;
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -96,12 +97,36 @@ export function calculateCornerBonus(cells: Cell[]): number {
 // ─── main reward function ────────────────────────────────────────────────────
 
 /**
+ * Returns true when the game has ended – the board is completely filled and
+ * no adjacent tiles share the same value (no merge is possible in any
+ * direction).
+ */
+export function isGameOver(cells: Cell[]): boolean {
+  const active = cells.filter((c) => !c.consumedBy);
+  // If fewer tiles than cells the board still has empty space
+  if (active.length < GRID_SIZE * GRID_SIZE) return false;
+
+  const grid = buildGrid(active);
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      const val = grid[r][c];
+      // Horizontally adjacent match → a merge is still possible
+      if (c + 1 < GRID_SIZE && grid[r][c + 1] === val) return false;
+      // Vertically adjacent match → a merge is still possible
+      if (r + 1 < GRID_SIZE && grid[r + 1][c] === val) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Composite reward used to train the DQN agent.
  *
  * Reward = mergeBonus  (log₂ of merged tile values)
  *        + emptyBonus  (number of empty cells)
  *        + monotonicity bonus
  *        + corner bonus
+ *        − gameOverPenalty  (applied when the episode ends)
  *
  * All components are normalised to roughly the same magnitude before weighting.
  */
@@ -110,6 +135,7 @@ export function calculateReward(
   nextCells: Cell[],
   prevScore: number,
   nextScore: number,
+  done = false,
 ): number {
   const scoreDelta = nextScore - prevScore;
   const mergeBonus =
@@ -135,6 +161,7 @@ export function calculateReward(
     .sort()
     .join("|");
   const stagnationPenalty = prevKey === nextKey ? -0.5 : 0;
+  const gameOverPenalty = done ? REWARD_WEIGHTS.gameOverPenalty : 0;
 
-  return mergeBonus + emptyBonus + mono + corner + stagnationPenalty;
+  return mergeBonus + emptyBonus + mono + corner + stagnationPenalty + gameOverPenalty;
 }
