@@ -141,6 +141,21 @@
   color: #c8b8ac;
 }
 
+.slotSpeed {
+  font-size: 12px;
+  color: #e0c870;
+  flex-shrink: 0;
+}
+
+.slotSpeedScore {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 10px;
+  color: #6a5e54;
+  pointer-events: none;
+}
+
 .slotStatus {
   font-size: 10px;
   color: #f67b5e;
@@ -148,6 +163,7 @@
 }
 
 .slotGrid {
+  position: relative;
   /* Override grid cell size for compact display */
   --cell-size: min(12vw, 80px);
   --gap-s: min(0.8vw, 4px);

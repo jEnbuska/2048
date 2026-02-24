@@ -30,6 +30,12 @@ export interface UseAiPlayerOptions {
    * Pass per-worker perturbed weights to enable runtime parameter tuning.
    */
   rewardWeights?: RewardWeights;
+  /**
+   * When true the hook fires moves as fast as the worker can handle them
+   * (0 ms scheduling delay).  The display layer is responsible for deciding
+   * how often to re-render – see ArenaGameSlot's display-state logic.
+   */
+  speedMode?: boolean;
 }
 
 export interface UseAiPlayerReturn {
@@ -114,6 +120,12 @@ export default function useAiPlayer(
     rewardWeightsRef.current = options.rewardWeights ?? REWARD_WEIGHTS;
   }, [options.rewardWeights]);
 
+  // Keep speedMode in a ref so scheduleNextMove always uses the latest value.
+  const speedModeRef = useRef(options.speedMode ?? false);
+  useEffect(() => {
+    speedModeRef.current = options.speedMode ?? false;
+  }, [options.speedMode]);
+
   // Queue of experiences waiting for the cells to update before being sent
   const pendingExpsRef = useRef<PendingExp[]>([]);
   // State captured right before SELECT_ACTION is sent
@@ -142,7 +154,7 @@ export default function useAiPlayer(
     if (!aiEnabledRef.current) return;
 
     const freeCells = countEmptyCells(cellsRef.current);
-    const delay = getMoveInterval(freeCells);
+    const delay = speedModeRef.current ? 0 : getMoveInterval(freeCells);
 
     timeoutRef.current = setTimeout(() => {
       timeoutRef.current = null;

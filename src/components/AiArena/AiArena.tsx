@@ -89,11 +89,6 @@ function saveStats(stats: ArenaStats) {
   }
 }
 
-function createGameState() {
-  const initialCells = addNewCell([]);
-  return { cells: addNewCell(initialCells), score: 0 };
-}
-
 function loadLeaderboard(): LeaderboardEntry[] {
   try {
     const raw = localStorage.getItem(LEADERBOARD_KEY);
@@ -113,12 +108,35 @@ function saveLeaderboard(entries: LeaderboardEntry[]) {
 
 // ─── ArenaGameSlot ────────────────────────────────────────────────────────────
 
+/** Combined state for the slot – avoids a separate display state and
+ *  the associated setState-in-effect pattern. */
+interface SlotState {
+  cells: Cell[];
+  score: number;
+  /** What the Grid actually renders.  In speed mode this lags behind `cells`
+   *  and only updates on notable events (new personal-best score / tile),
+   *  throttled to ≤ 50 ms.  In normal mode it always mirrors `cells`. */
+  displayCells: Cell[];
+  displayScore: number;
+}
+
+function createSlotState(): SlotState {
+  const cells = addNewCell(addNewCell([]));
+  return { cells, score: 0, displayCells: cells, displayScore: 0 };
+}
+
 interface ArenaGameSlotProps {
   /** Stable ID so the worker is created once and never torn down by key changes. */
   id: number;
   autoRestart: boolean;
   /** Per-slot reward weights used by this worker's experience replay. */
   rewardWeights: RewardWeights;
+  /**
+   * When true the AI runs as fast as possible and the grid only re-renders
+   * when a new per-slot top-score or new highest-tile is reached, throttled to
+   * at most once every 50 ms.
+   */
+  speedMode: boolean;
   onGameOver: (score: number, saveAsBest: () => void, weights: RewardWeights) => void;
   onTrainStep: () => void;
 }
@@ -127,11 +145,25 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
   id,
   autoRestart,
   rewardWeights,
+  speedMode,
   onGameOver,
   onTrainStep,
 }: ArenaGameSlotProps) {
-  const [{ cells, score }, setState] = useState(createGameState);
+  const [state, setState] = useState<SlotState>(createSlotState);
   const [restartCount, setRestartCount] = useState(0);
+
+  const { cells, score, displayCells, displayScore } = state;
+
+  // Speed-mode tracking refs – never cause a re-render themselves.
+  // Accessed inside the setState updater to decide whether to refresh the
+  // display layer, avoiding a setState-in-effect anti-pattern.
+  const speedModeRef = useRef(speedMode);
+  useEffect(() => {
+    speedModeRef.current = speedMode;
+  }, [speedMode]);
+  const topScoreRef = useRef(0);
+  const topTileRef = useRef(0);
+  const lastDisplayMsRef = useRef(0);
 
   const updateStateByVector = useCallback(
     (vector: Coordinate<-1 | 0 | 1>) => {
@@ -151,7 +183,36 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
           ) {
             return prevState;
           }
-          return { cells: addNewCell(nextCells), score: nextScore };
+
+          const nextCellsWithNew = addNewCell(nextCells);
+          const gameOver = isGameOver(nextCellsWithNew);
+
+          // Decide whether to refresh the display layer.
+          let { displayCells, displayScore } = prevState;
+
+          if (!speedModeRef.current) {
+            // Normal mode: display always mirrors actual state.
+            displayCells = nextCellsWithNew;
+            displayScore = nextScore;
+          } else {
+            // Speed mode: only update display on notable events, throttled.
+            // maxTile is computed over at most 16 cells – O(1) in practice.
+            const activeCells = nextCellsWithNew.filter((c) => !c.consumedBy);
+            const maxTile = activeCells.reduce((m, c) => Math.max(m, c.value), 0);
+            const isNewTopScore = nextScore > topScoreRef.current;
+            const isNewTopTile = maxTile > topTileRef.current;
+            if (isNewTopScore) topScoreRef.current = nextScore;
+            if (isNewTopTile) topTileRef.current = maxTile;
+            const now = Date.now();
+            const throttleOk = now - lastDisplayMsRef.current >= 50;
+            if (gameOver || ((isNewTopScore || isNewTopTile) && throttleOk)) {
+              lastDisplayMsRef.current = now;
+              displayCells = nextCellsWithNew;
+              displayScore = nextScore;
+            }
+          }
+
+          return { cells: nextCellsWithNew, score: nextScore, displayCells, displayScore };
         } catch {
           return prevState;
         }
@@ -176,6 +237,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
       onTrainStep,
       restartTrigger: restartCount,
       rewardWeights,
+      speedMode,
     },
   );
 
@@ -192,7 +254,11 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
   useEffect(() => {
     if (!autoRestart || !isGameOver(cells)) return;
     const timer = setTimeout(() => {
-      setState(createGameState());
+      // Reset speed-mode trackers for the new game.
+      topScoreRef.current = 0;
+      topTileRef.current = 0;
+      lastDisplayMsRef.current = 0;
+      setState(createSlotState());
       setRestartCount((c) => c + 1);
     }, 800);
     return () => clearTimeout(timer);
@@ -203,6 +269,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
   return (
     <div className={`${styles.slot} ${gameOver ? styles.slotGameOver : ""}`}>
       <div className={styles.slotHeader}>
+        {speedMode && <span className={styles.slotSpeed}>⚡</span>}
         <span className={styles.slotId}>#{id + 1}</span>
         <span className={styles.slotScore}>{score}</span>
         {!workerReady && <span className={styles.slotStatus}>loading…</span>}
@@ -212,7 +279,10 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
         {gameOver && <span className={styles.slotStatus}>game over</span>}
       </div>
       <div className={styles.slotGrid}>
-        <Grid cells={cells.slice().sort((a, b) => a.id - b.id)} />
+        <Grid cells={displayCells.slice().sort((a, b) => a.id - b.id)} />
+        {speedMode && displayCells !== cells && (
+          <span className={styles.slotSpeedScore}>{displayScore.toLocaleString()}</span>
+        )}
       </div>
     </div>
   );
@@ -223,6 +293,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
 export default function AiArena() {
   const [workerCount, setWorkerCount] = useState(4);
   const [autoRestart, setAutoRestart] = useState(true);
+  const [speedMode, setSpeedMode] = useState(false);
   const [restartTrigger, setRestartTrigger] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(
     loadLeaderboard,
@@ -314,6 +385,10 @@ export default function AiArena() {
     setAutoRestart((v) => !v);
   }, []);
 
+  const toggleSpeedMode = useCallback(() => {
+    setSpeedMode((v) => !v);
+  }, []);
+
   const clearLeaderboard = useCallback(() => {
     setLeaderboard([]);
     bestScoreRef.current = 0;
@@ -347,6 +422,12 @@ export default function AiArena() {
             onClick={toggleAutoRestart}
           >
             {autoRestart ? "⟳ Auto-restart ON" : "⟳ Auto-restart OFF"}
+          </button>
+          <button
+            className={`${styles.actionBtn} ${speedMode ? styles.actionBtnActive : ""}`}
+            onClick={toggleSpeedMode}
+          >
+            {speedMode ? "⚡ Speed ON" : "⚡ Speed OFF"}
           </button>
         </div>
 
@@ -401,6 +482,7 @@ export default function AiArena() {
             id={id}
             autoRestart={autoRestart}
             rewardWeights={slotWeights[id] ?? { ...REWARD_WEIGHTS }}
+            speedMode={speedMode}
             onGameOver={handleGameOver}
             onTrainStep={handleTrainStep}
           />
