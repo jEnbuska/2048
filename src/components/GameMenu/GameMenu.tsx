@@ -20,14 +20,12 @@ export default function GameMenu({
   return (
     <div className={styles.gameMenu}>
       <GameScore score={score} />
-      <div className={styles.controls}>
-        <AiPlayer
-          aiEnabled={aiEnabled}
-          toggleAi={toggleAi}
-          workerReady={aiWorkerReady}
-        />
-        <RestartGame restartGame={restartGame} />
-      </div>
+      <RestartGame restartGame={restartGame} />
+      <AiPlayer
+        aiEnabled={aiEnabled}
+        toggleAi={toggleAi}
+        workerReady={aiWorkerReady}
+      />
     </div>
   );
 }
