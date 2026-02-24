@@ -24,8 +24,9 @@
  */
 
 import "@tensorflow/tfjs"; // registers WebGL / CPU backend
-import { DQNAgent } from "./dqnAgent";
+import { DQNAgent, ACTIONS } from "./dqnAgent";
 import type { DQNConfig, Experience } from "./dqnAgent";
+import { encodeBoardFlat } from "./encoding";
 import type { Cell, TiltDirection } from "../types";
 
 // ─── Message types ────────────────────────────────────────────────────────────
@@ -40,7 +41,7 @@ export type WorkerInMessage =
 
 export type WorkerOutMessage =
   | { type: "READY" }
-  | { type: "ACTION"; direction: TiltDirection }
+  | { type: "ACTION"; direction: TiltDirection; actionIndex: number }
   | { type: "TRAIN_RESULT"; loss: number | null }
   | { type: "SAVE_DONE" }
   | { type: "LOAD_DONE" }
@@ -61,10 +62,13 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
 
       case "SELECT_ACTION": {
         if (!agent) throw new Error("Agent not initialised");
-        const direction = agent.selectActionFromCells(msg.cells);
+        const flat = encodeBoardFlat(msg.cells);
+        const actionIndex = agent.selectAction(flat);
+        const direction = ACTIONS[actionIndex];
         self.postMessage({
           type: "ACTION",
           direction,
+          actionIndex,
         } satisfies WorkerOutMessage);
         break;
       }

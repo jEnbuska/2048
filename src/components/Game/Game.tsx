@@ -45,7 +45,7 @@ const Game = () => {
     });
   }, []);
 
-  const { aiEnabled, toggleAi, workerReady } = useAiPlayer(cells, updateStateByVector);
+  const { aiEnabled, toggleAi, workerReady } = useAiPlayer(cells, score, updateStateByVector);
 
   useDocumentEventListener({
     type: "keydown",
