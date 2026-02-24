@@ -16,6 +16,7 @@ function createGameState() {
   return { cells: addNewCell(initialCells), score: 0 };
 }
 const Game = () => {
+  // Local state used when the user plays manually (AI off).
   const [{ cells, score }, setState] = useState<{
     cells: Cell[];
     score: number;
@@ -45,7 +46,8 @@ const Game = () => {
     });
   }, []);
 
-  const { aiEnabled, toggleAi, workerReady } = useAiPlayer(cells, score, updateStateByVector);
+  // Worker-driven game loop; displayCells / displayScore come from the worker.
+  const { aiEnabled, toggleAi, workerReady, resetGame, displayCells, displayScore } = useAiPlayer();
 
   useDocumentEventListener({
     type: "keydown",
@@ -68,18 +70,24 @@ const Game = () => {
   });
   const restartGame = useCallback(() => {
     setState(createGameState());
-  }, []);
+    resetGame();
+  }, [resetGame]);
+
+  // When the AI is running, show what the worker is displaying; otherwise
+  // show the local state that the user is controlling manually.
+  const shownCells = aiEnabled ? displayCells : cells;
+  const shownScore = aiEnabled ? displayScore : score;
 
   return (
     <div className={styles.game} {...handlers}>
       <GameMenu
-        score={score}
+        score={shownScore}
         restartGame={restartGame}
         aiEnabled={aiEnabled}
         toggleAi={toggleAi}
         aiWorkerReady={workerReady}
       />
-      <Grid cells={cells.slice().sort((a, b) => a.id - b.id)} />
+      <Grid cells={shownCells.slice().sort((a, b) => a.id - b.id)} />
     </div>
   );
 };

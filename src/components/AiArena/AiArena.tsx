@@ -6,13 +6,9 @@ import {
   useTransition,
   memo,
 } from "react";
-import type { Cell, Coordinate } from "../../types";
-import addNewCell from "../../utils/addNewCell";
-import tilt from "../../utils/tilt";
 import useAiPlayer from "../../hooks/useAiPlayer";
 import { BEST_MODEL_KEY, POLICY_MODEL_KEY } from "../../hooks/useAiPlayer";
 import Grid from "../Grid/Grid";
-import { isGameOver } from "../../ai/rewardUtils";
 import { REWARD_WEIGHTS } from "../../ai/rewardUtils";
 import type { RewardWeights } from "../../ai/rewardUtils";
 import { getRandomFunnyName } from "../../utils/funnyNames";
@@ -240,23 +236,6 @@ function saveScoreHistory(history: number[]) {
 
 // ─── ArenaGameSlot ────────────────────────────────────────────────────────────
 
-/** Combined state for the slot – avoids a separate display state and
- *  the associated setState-in-effect pattern. */
-interface SlotState {
-  cells: Cell[];
-  score: number;
-  /** What the Grid actually renders.  In speed mode this lags behind `cells`
-   *  and only updates on notable events (new personal-best score / tile),
-   *  throttled to ≤ 50 ms.  In normal mode it always mirrors `cells`. */
-  displayCells: Cell[];
-  displayScore: number;
-}
-
-function createSlotState(): SlotState {
-  const cells = addNewCell(addNewCell([]));
-  return { cells, score: 0, displayCells: cells, displayScore: 0 };
-}
-
 interface ArenaGameSlotProps {
   /** Stable ID so the worker is created once and never torn down by key changes. */
   id: number;
@@ -264,9 +243,8 @@ interface ArenaGameSlotProps {
   /** Per-slot reward weights used by this worker's experience replay. */
   rewardWeights: RewardWeights;
   /**
-   * When true the AI runs as fast as possible and the grid only re-renders
-   * when a new per-slot top-score or new highest-tile is reached, throttled to
-   * at most once every 50 ms.
+   * When true the worker runs the game loop as fast as possible and throttles
+   * DISPLAY messages to at most once every 500 ms.
    */
   speedMode: boolean;
   onGameOver: (id: number, score: number, saveAsBest: () => void, weights: RewardWeights) => void;
@@ -284,78 +262,6 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
   onTrainStep,
   onBackendDetected,
 }: ArenaGameSlotProps) {
-  const [state, setState] = useState<SlotState>(createSlotState);
-  const [restartCount, setRestartCount] = useState(0);
-
-  const { cells, score, displayCells, displayScore } = state;
-
-  // Speed-mode tracking refs – never cause a re-render themselves.
-  // Accessed inside the setState updater to decide whether to refresh the
-  // display layer, avoiding a setState-in-effect anti-pattern.
-  const speedModeRef = useRef(speedMode);
-  useEffect(() => {
-    speedModeRef.current = speedMode;
-  }, [speedMode]);
-  const topScoreRef = useRef(0);
-  const topTileRef = useRef(0);
-  const lastDisplayMsRef = useRef(0);
-
-  const updateStateByVector = useCallback(
-    (vector: Coordinate<-1 | 0 | 1>) => {
-      setState((prevState) => {
-        const { score } = prevState;
-        const cells = prevState.cells.filter((it) => !it.consumedBy);
-        try {
-          const nextCells = tilt(vector, cells);
-          const nextScore = nextCells
-            .filter((cell: Cell) => cell.consumedBy)
-            .map((cell) => cell.value)
-            .reduce((a, b) => a + b * 2, score);
-          const sortById = (a: Cell, b: Cell) => a.id - b.id;
-          if (
-            JSON.stringify(nextCells.slice().sort(sortById)) ===
-            JSON.stringify(cells.slice().sort(sortById))
-          ) {
-            return prevState;
-          }
-
-          const nextCellsWithNew = addNewCell(nextCells);
-          const gameOver = isGameOver(nextCellsWithNew);
-
-          // Decide whether to refresh the display layer.
-          let { displayCells, displayScore } = prevState;
-
-          if (!speedModeRef.current) {
-            // Normal mode: display always mirrors actual state.
-            displayCells = nextCellsWithNew;
-            displayScore = nextScore;
-          } else {
-            // Speed mode: only update display on notable events, throttled.
-            // maxTile is computed over at most 16 cells – O(1) in practice.
-            const activeCells = nextCellsWithNew.filter((c) => !c.consumedBy);
-            const maxTile = activeCells.reduce((m, c) => Math.max(m, c.value), 0);
-            const isNewTopScore = nextScore > topScoreRef.current;
-            const isNewTopTile = maxTile > topTileRef.current;
-            if (isNewTopScore) topScoreRef.current = nextScore;
-            if (isNewTopTile) topTileRef.current = maxTile;
-            const now = Date.now();
-            const throttleOk = now - lastDisplayMsRef.current >= 50;
-            if (gameOver || ((isNewTopScore || isNewTopTile) && throttleOk)) {
-              lastDisplayMsRef.current = now;
-              displayCells = nextCellsWithNew;
-              displayScore = nextScore;
-            }
-          }
-
-          return { cells: nextCellsWithNew, score: nextScore, displayCells, displayScore };
-        } catch {
-          return prevState;
-        }
-      });
-    },
-    [],
-  );
-
   const handleGameOver = useCallback(
     (finalScore: number, saveAsBest: () => void) => {
       onGameOver(id, finalScore, saveAsBest, rewardWeights);
@@ -363,21 +269,24 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
     [id, onGameOver, rewardWeights],
   );
 
-  const { aiEnabled, toggleAi, workerReady, saveAsBest } = useAiPlayer(
-    cells,
-    score,
-    updateStateByVector,
-    {
-      onGameOver: (s) => handleGameOver(s, saveAsBest),
-      onTrainStep,
-      restartTrigger: restartCount,
-      rewardWeights,
-      speedMode,
-      onBackendDetected,
-    },
-  );
+  const {
+    aiEnabled,
+    toggleAi,
+    workerReady,
+    saveAsBest,
+    resetGame,
+    displayCells,
+    displayScore,
+    gameOver,
+  } = useAiPlayer({
+    onGameOver: (s) => handleGameOver(s, saveAsBest),
+    onTrainStep,
+    rewardWeights,
+    speedMode,
+    onBackendDetected,
+  });
 
-  // Auto-start AI once the worker is ready
+  // Auto-start AI once the worker is ready.
   const aiStartedRef = useRef(false);
   useEffect(() => {
     if (workerReady && !aiStartedRef.current) {
@@ -386,28 +295,23 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
     }
   }, [workerReady, toggleAi]);
 
-  // Auto-restart when the game ends (if autoRestart is on)
+  // Auto-restart when the game ends (if autoRestart is on).
   useEffect(() => {
-    if (!autoRestart || !isGameOver(cells)) return;
+    if (!autoRestart || !gameOver) return;
     const timer = setTimeout(() => {
-      // Reset speed-mode trackers for the new game.
-      topScoreRef.current = 0;
-      topTileRef.current = 0;
-      lastDisplayMsRef.current = 0;
-      setState(createSlotState());
-      setRestartCount((c) => c + 1);
+      resetGame();
     }, 800);
     return () => clearTimeout(timer);
-  }, [cells, autoRestart]);
+  }, [gameOver, autoRestart, resetGame]);
 
-  const gameOver = isGameOver(cells);
+  const sortedCells = displayCells.slice().sort((a, b) => a.id - b.id);
 
   return (
     <div className={`${styles.slot} ${gameOver ? styles.slotGameOver : ""}`}>
       <div className={styles.slotHeader}>
         {speedMode && <span className={styles.slotSpeed}>⚡</span>}
         <span className={styles.slotId}>#{id + 1}</span>
-        <span className={styles.slotScore}>{score}</span>
+        <span className={styles.slotScore}>{displayScore}</span>
         {!workerReady && <span className={styles.slotStatus}>loading…</span>}
         {workerReady && !aiEnabled && (
           <span className={styles.slotStatus}>ready</span>
@@ -415,10 +319,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
         {gameOver && <span className={styles.slotStatus}>game over</span>}
       </div>
       <div className={styles.slotGrid}>
-        <Grid cells={displayCells.slice().sort((a, b) => a.id - b.id)} />
-        {speedMode && displayCells !== cells && (
-          <span className={styles.slotSpeedScore}>{displayScore.toLocaleString()}</span>
-        )}
+        <Grid cells={sortedCells} />
       </div>
     </div>
   );

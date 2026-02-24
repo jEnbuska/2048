@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Cell, Coordinate, TiltDirection } from "../types";
-import get2DVectorByTiltDirection from "../utils/get2DVectorByTiltDirection";
+import type { Cell } from "../types";
 import type { WorkerInMessage, WorkerOutMessage } from "../ai/aiWorker";
-import { encodeBoardFlat, countEmptyCells } from "../ai/encoding";
-import { calculateReward, isGameOver, REWARD_WEIGHTS } from "../ai/rewardUtils";
+import { REWARD_WEIGHTS } from "../ai/rewardUtils";
 import type { RewardWeights } from "../ai/rewardUtils";
-import { getMoveInterval } from "../utils/moveInterval";
-
-/** Auto-save the model every this many completed training steps. */
-const SAVE_EVERY = 20;
 
 /** Shared model keys stored in IndexedDB. */
 export const BEST_MODEL_KEY = "2048-dqn-best";
@@ -20,25 +14,19 @@ export interface UseAiPlayerOptions {
   /** Called after each completed training step (TRAIN_RESULT received). */
   onTrainStep?: () => void;
   /**
-   * Increment this value to trigger an immediate game reset inside the hook
-   * (clears pending experiences and reschedules the next move).
-   */
-  restartTrigger?: number;
-  /**
    * Custom reward weights for this worker instance.
    * Defaults to the global REWARD_WEIGHTS when omitted.
-   * Pass per-worker perturbed weights to enable runtime parameter tuning.
    */
   rewardWeights?: RewardWeights;
   /**
-   * When true the hook fires moves as fast as the worker can handle them
-   * (0 ms scheduling delay).  The display layer is responsible for deciding
-   * how often to re-render – see ArenaGameSlot's display-state logic.
+   * When true the worker runs the game loop as fast as possible and
+   * throttles DISPLAY messages to at most once per 500 ms.
+   * When false every move triggers a DISPLAY message.
    */
   speedMode?: boolean;
   /**
    * Called once with the TF.js backend name (e.g. "webgl", "cpu") when the
-   * worker reports that it is ready.  Useful for displaying GPU/CPU status.
+   * worker reports that it is ready.
    */
   onBackendDetected?: (backend: string) => void;
 }
@@ -49,94 +37,41 @@ export interface UseAiPlayerReturn {
   workerReady: boolean;
   /** Save the current policy weights to the shared "best" model slot. */
   saveAsBest: () => void;
+  /** Reset the board and restart the game loop immediately. */
+  resetGame: () => void;
+  /** Cells to render (already throttled by the worker). */
+  displayCells: Cell[];
+  /** Score to display (from the latest DISPLAY message). */
+  displayScore: number;
+  /** Whether the game has ended. */
+  gameOver: boolean;
 }
 
-/** Pending experience descriptor – queued when ACTION arrives, consumed when cells update. */
-interface PendingExp {
-  prevCells: Cell[];
-  prevScore: number;
-  actionIndex: number;
-}
-
+// Initial empty board so the Grid renders an empty grid before the first DISPLAY.
 /**
- * Sends all queued experiences to the worker as REMEMBER + TRAIN_STEP pairs,
- * then clears the queue.  Extracted to avoid duplicating the same loop for the
- * game-over and mid-game paths.
- */
-function drainExperiences(
-  worker: Worker,
-  pending: PendingExp[],
-  nextCells: Cell[],
-  nextScore: number,
-  done: boolean,
-  weights: RewardWeights,
-): void {
-  while (pending.length > 0) {
-    const exp = pending.shift();
-    if (!exp) break;
-    const state = encodeBoardFlat(exp.prevCells);
-    const nextState = encodeBoardFlat(nextCells);
-    const reward = calculateReward(
-      exp.prevCells, nextCells, exp.prevScore, nextScore, done, weights,
-    );
-    worker.postMessage({
-      type: "REMEMBER",
-      experience: { state, action: exp.actionIndex, reward, nextState, done },
-    } satisfies WorkerInMessage);
-    worker.postMessage({ type: "TRAIN_STEP" } satisfies WorkerInMessage);
-  }
-}
-
-/**
- * Manages an AI Web Worker that runs the DQN agent in a separate thread.
+ * Manages an AI Web Worker that runs the full 2048 game loop.
  *
- * Changes from the original single-game version:
- * - Move interval is dynamic: computed from the number of free cells so that
- *   a nearly-empty board moves at ~5 ms and a nearly-full board at ~500 ms.
- * - On startup the worker tries to load the shared "best" model first, then
- *   the regular policy model, before falling back to training from scratch.
- * - Exposes `saveAsBest()` so the caller can persist a high-scoring model to
- *   the shared best-model slot that future workers will load from.
- * - Accepts `onGameOver` and `restartTrigger` options for multi-game use.
+ * Unlike the previous version this hook no longer drives the game loop from
+ * the React side.  The worker owns all board state; it applies moves, computes
+ * rewards, trains the DQN, and decides when to push a DISPLAY update to React.
+ * React only re-renders when the worker sends a message – at most once every
+ * 500 ms in speed mode, or once per move in normal mode.
  */
-export default function useAiPlayer(
-  cells: Cell[],
-  score: number,
-  onMove: (vector: Coordinate<-1 | 0 | 1>) => void,
-  options: UseAiPlayerOptions = {},
-): UseAiPlayerReturn {
+export default function useAiPlayer(options: UseAiPlayerOptions = {}): UseAiPlayerReturn {
   const [aiEnabled, setAiEnabled] = useState(false);
   const [workerReady, setWorkerReady] = useState(false);
+  const [displayCells, setDisplayCells] = useState<Cell[]>([]);
+  const [displayScore, setDisplayScore] = useState(0);
+  const [gameOver, setGameOver] = useState(false);
 
   const workerRef = useRef<Worker | null>(null);
   const aiEnabledRef = useRef(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingActionRef = useRef(false);
-
-  // Keep aiEnabledRef in sync with state
   useEffect(() => {
     aiEnabledRef.current = aiEnabled;
   }, [aiEnabled]);
 
-  // Keep a ref to the latest cells so the timeout always uses fresh state
-  const cellsRef = useRef(cells);
-  useEffect(() => {
-    cellsRef.current = cells;
-  }, [cells]);
-
-  // Keep a ref to the latest score
-  const scoreRef = useRef(score);
-  useEffect(() => {
-    scoreRef.current = score;
-  }, [score]);
-
-  // Keep onMove in a ref so the worker callback always uses the latest version
-  const onMoveRef = useRef(onMove);
-  useEffect(() => {
-    onMoveRef.current = onMove;
-  }, [onMove]);
-
-  // Keep option callbacks in refs
+  // Keep option callbacks in refs so worker message handlers always call the
+  // current version without causing the worker-init effect to re-run.
   const onGameOverRef = useRef(options.onGameOver);
   useEffect(() => {
     onGameOverRef.current = options.onGameOver;
@@ -152,64 +87,33 @@ export default function useAiPlayer(
     onBackendDetectedRef.current = options.onBackendDetected;
   }, [options.onBackendDetected]);
 
-  // Keep the latest reward weights in a ref so experience calculations always
-  // use the value current at the time of the move, without needing re-renders.
+  // Keep the latest option values in refs so they are always current when
+  // START_GAME / RESET_GAME is sent, without triggering extra renders.
   const rewardWeightsRef = useRef<RewardWeights>(options.rewardWeights ?? REWARD_WEIGHTS);
+  const speedModeRef = useRef(options.speedMode ?? false);
+
+  // Propagate rewardWeights changes to the running worker.
   useEffect(() => {
     rewardWeightsRef.current = options.rewardWeights ?? REWARD_WEIGHTS;
+    workerRef.current?.postMessage({
+      type: "SET_REWARD_WEIGHTS",
+      weights: rewardWeightsRef.current,
+    } satisfies WorkerInMessage);
   }, [options.rewardWeights]);
 
-  // Keep speedMode in a ref so scheduleNextMove always uses the latest value.
-  const speedModeRef = useRef(options.speedMode ?? false);
+  // Propagate speedMode changes to the running worker.
   useEffect(() => {
     speedModeRef.current = options.speedMode ?? false;
+    workerRef.current?.postMessage({
+      type: "SET_SPEED_MODE",
+      speedMode: speedModeRef.current,
+    } satisfies WorkerInMessage);
   }, [options.speedMode]);
-
-  // Queue of experiences waiting for the cells to update before being sent
-  const pendingExpsRef = useRef<PendingExp[]>([]);
-  // State captured right before SELECT_ACTION is sent
-  const prevCellsForExpRef = useRef<Cell[]>([]);
-  const prevScoreForExpRef = useRef(0);
-  // Count of completed training steps, used for periodic saves
-  const trainStepCountRef = useRef(0);
 
   // Load-attempt sequence: 'best' → 'policy' → 'done'
   const loadAttemptRef = useRef<"best" | "policy" | "done" | null>(null);
 
-  // Prevent onGameOver firing more than once per game
-  const wasGameOverRef = useRef(false);
-
-  const applyDirection = useCallback((direction: TiltDirection) => {
-    const vector = get2DVectorByTiltDirection(direction);
-    onMoveRef.current(vector);
-  }, []);
-
-  /** Schedule the next SELECT_ACTION with a delay based on the current free-cell count. */
-  const scheduleNextMove = useCallback(() => {
-    if (timeoutRef.current !== null) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-    if (!aiEnabledRef.current) return;
-
-    const freeCells = countEmptyCells(cellsRef.current);
-    const delay = speedModeRef.current ? 0 : getMoveInterval(freeCells);
-
-    timeoutRef.current = setTimeout(() => {
-      timeoutRef.current = null;
-      const worker = workerRef.current;
-      if (!worker || !aiEnabledRef.current || pendingActionRef.current) return;
-      pendingActionRef.current = true;
-      prevCellsForExpRef.current = cellsRef.current;
-      prevScoreForExpRef.current = scoreRef.current;
-      worker.postMessage({
-        type: "SELECT_ACTION",
-        cells: cellsRef.current,
-      } satisfies WorkerInMessage);
-    }, delay);
-  }, []);
-
-  // Initialize worker on mount
+  // Initialize worker on mount.
   useEffect(() => {
     const worker = new Worker(
       new URL("../ai/aiWorker.ts", import.meta.url),
@@ -222,7 +126,7 @@ export default function useAiPlayer(
         case "READY":
           setWorkerReady(true);
           onBackendDetectedRef.current?.(msg.backend);
-          // Try loading best model first, then regular policy
+          // Try loading best model first, then regular policy.
           loadAttemptRef.current = "best";
           worker.postMessage({
             type: "LOAD_MODEL",
@@ -230,36 +134,20 @@ export default function useAiPlayer(
           } satisfies WorkerInMessage);
           break;
 
-        case "ACTION":
-          if (aiEnabledRef.current) {
-            pendingExpsRef.current.push({
-              prevCells: prevCellsForExpRef.current,
-              prevScore: prevScoreForExpRef.current,
-              actionIndex: msg.actionIndex,
-            });
-            applyDirection(msg.direction);
-          }
-          pendingActionRef.current = false;
-          // Always reschedule here. When a move is a no-op (the board doesn't
-          // change), the cells effect never fires so scheduleNextMove() would
-          // never be called from there – permanently stalling the loop.
-          // For effective moves the cells effect will also call scheduleNextMove(),
-          // which simply cancels this timer and re-creates it with the updated
-          // free-cell count (the correct, desired behaviour).
-          if (aiEnabledRef.current) {
-            scheduleNextMove();
-          }
+        case "DISPLAY":
+          setDisplayCells(msg.cells);
+          setDisplayScore(msg.score);
+          setGameOver(msg.gameOver);
+          break;
+
+        case "GAME_OVER":
+          // score and gameOver are already set by the preceding DISPLAY message;
+          // call the callback so the arena can record stats.
+          onGameOverRef.current?.(msg.score);
           break;
 
         case "TRAIN_RESULT":
-          trainStepCountRef.current++;
           onTrainStepRef.current?.();
-          if (trainStepCountRef.current % SAVE_EVERY === 0) {
-            worker.postMessage({
-              type: "SAVE_MODEL",
-              key: POLICY_MODEL_KEY,
-            } satisfies WorkerInMessage);
-          }
           break;
 
         case "SAVE_DONE":
@@ -271,19 +159,18 @@ export default function useAiPlayer(
 
         case "ERROR":
           if (loadAttemptRef.current === "best") {
-            // Best model not found – try the regular policy model
+            // Best model not found – try the regular policy model.
             loadAttemptRef.current = "policy";
             worker.postMessage({
               type: "LOAD_MODEL",
               key: POLICY_MODEL_KEY,
             } satisfies WorkerInMessage);
           } else if (loadAttemptRef.current === "policy") {
-            // Policy model not found either – start fresh
+            // Policy model not found either – start fresh.
             loadAttemptRef.current = "done";
           } else {
             console.error("[AI Worker]", msg.message);
           }
-          pendingActionRef.current = false;
           break;
 
         default:
@@ -298,120 +185,47 @@ export default function useAiPlayer(
       worker.terminate();
       workerRef.current = null;
     };
-  }, [applyDirection, scheduleNextMove]);
+  }, []);
 
-  // After each AI move the cells (and possibly score) update.
-  // Drain the pending experience queue and schedule the next move.
+  // Start the game loop once AI is enabled and the worker is ready.
   useEffect(() => {
-    const worker = workerRef.current;
-    const gameOver = isGameOver(cells);
-
-    if (gameOver) {
-      if (!wasGameOverRef.current) {
-        wasGameOverRef.current = true;
-        onGameOverRef.current?.(score);
-      }
-      // Stop scheduling moves once the board is stuck
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      // Still drain any final experience from the last move
-      if (worker && pendingExpsRef.current.length > 0) {
-        drainExperiences(
-          worker,
-          pendingExpsRef.current,
-          cells,
-          score,
-          true,
-          rewardWeightsRef.current,
-        );
-      }
-      return;
-    }
-
-    // Transitioning out of game-over means a new game just started (restart)
-    if (wasGameOverRef.current) {
-      wasGameOverRef.current = false;
-      pendingExpsRef.current = [];
-      if (aiEnabledRef.current) {
-        scheduleNextMove();
-      }
-      return;
-    }
-
-    // Normal game running: drain pending experiences
-    if (worker && pendingExpsRef.current.length > 0) {
-      drainExperiences(
-        worker,
-        pendingExpsRef.current,
-        cells,
-        score,
-        false, // not game-over – the early return above handles that branch
-        rewardWeightsRef.current,
-      );
-      // Schedule next move now that the experience has been recorded
-      if (aiEnabledRef.current) {
-        scheduleNextMove();
-      }
-    } else if (aiEnabledRef.current && !pendingActionRef.current && timeoutRef.current === null) {
-      // No pending exps and no scheduled move – ensure the loop keeps going
-      scheduleNextMove();
-    }
-  }, [cells, score, scheduleNextMove]);
-
-  // Start/stop the move loop when AI is toggled or worker becomes ready
-  useEffect(() => {
-    if (aiEnabled && workerReady) {
-      scheduleNextMove();
-    } else {
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-    }
-
-    return () => {
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-    };
-  }, [aiEnabled, workerReady, scheduleNextMove]);
-
-  // Handle external restart trigger
-  const prevRestartTriggerRef = useRef(options.restartTrigger ?? 0);
-  useEffect(() => {
-    const trigger = options.restartTrigger ?? 0;
-    if (trigger !== prevRestartTriggerRef.current) {
-      prevRestartTriggerRef.current = trigger;
-      pendingExpsRef.current = [];
-      wasGameOverRef.current = false;
-      pendingActionRef.current = false;
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      if (aiEnabledRef.current) {
-        scheduleNextMove();
-      }
-    }
-  }, [options.restartTrigger, scheduleNextMove]);
+    if (!aiEnabled || !workerReady) return;
+    workerRef.current?.postMessage({
+      type: "START_GAME",
+      speedMode: speedModeRef.current,
+      rewardWeights: rewardWeightsRef.current,
+    } satisfies WorkerInMessage);
+  }, [aiEnabled, workerReady]);
 
   const toggleAi = useCallback(() => {
     setAiEnabled((prev) => !prev);
   }, []);
 
-  const saveAsBest = useCallback(() => {
-    const worker = workerRef.current;
-    if (worker) {
-      worker.postMessage({
-        type: "SAVE_MODEL",
-        key: BEST_MODEL_KEY,
-      } satisfies WorkerInMessage);
-    }
+  const resetGame = useCallback(() => {
+    setGameOver(false);
+    workerRef.current?.postMessage({
+      type: "RESET_GAME",
+      speedMode: speedModeRef.current,
+      rewardWeights: rewardWeightsRef.current,
+    } satisfies WorkerInMessage);
   }, []);
 
-  return { aiEnabled, toggleAi, workerReady, saveAsBest };
+  const saveAsBest = useCallback(() => {
+    workerRef.current?.postMessage({
+      type: "SAVE_MODEL",
+      key: BEST_MODEL_KEY,
+    } satisfies WorkerInMessage);
+  }, []);
+
+  return {
+    aiEnabled,
+    toggleAi,
+    workerReady,
+    saveAsBest,
+    resetGame,
+    displayCells,
+    displayScore,
+    gameOver,
+  };
 }
 
