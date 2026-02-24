@@ -8,7 +8,6 @@ import get2DVectorByTiltDirection from "../../utils/get2DVectorByTiltDirection.t
 import tilt from "../../utils/tilt";
 import Grid from "../Grid/Grid";
 import styles from "./styles.module.css";
-import GameScore from "../GameScore/GameScore.tsx";
 import GameMenu from "../GameMenu/GameMenu.tsx";
 
 function createGameState() {
