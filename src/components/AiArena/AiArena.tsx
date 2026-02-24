@@ -528,9 +528,14 @@ export default function AiArena() {
 
   const handleGameOver = useCallback(
     (slotId: number, score: number, saveAsBest: () => void, slotWeights: RewardWeights) => {
-      // Functional update ensures concurrent game-overs from multiple workers
-      // are queued and processed sequentially without losing counts.
-      setStats((prev) => ({ ...prev, totalModels: prev.totalModels + 1 }));
+      // Single functional update: always bump totalModels and, for non-zero
+      // scores, accumulate the running totals used for the all-time average.
+      setStats((prev) => ({
+        ...prev,
+        totalModels: prev.totalModels + 1,
+        allTimeSum: score > 0 ? prev.allTimeSum + score : prev.allTimeSum,
+        allTimeCount: score > 0 ? prev.allTimeCount + 1 : prev.allTimeCount,
+      }));
 
       if (score > bestScoreRef.current) {
         bestScoreRef.current = score;
@@ -542,13 +547,6 @@ export default function AiArena() {
 
       // Skip trivial scores (game ended before making any moves).
       if (score === 0) return;
-
-      // Accumulate all-time running totals.
-      setStats((prev) => ({
-        ...prev,
-        allTimeSum: prev.allTimeSum + score,
-        allTimeCount: prev.allTimeCount + 1,
-      }));
 
       // Track score in history for the performance graph.
       setScoreHistory((prev) => {

@@ -59,6 +59,35 @@ interface PendingExp {
 }
 
 /**
+ * Sends all queued experiences to the worker as REMEMBER + TRAIN_STEP pairs,
+ * then clears the queue.  Extracted to avoid duplicating the same loop for the
+ * game-over and mid-game paths.
+ */
+function drainExperiences(
+  worker: Worker,
+  pending: PendingExp[],
+  nextCells: Cell[],
+  nextScore: number,
+  done: boolean,
+  weights: RewardWeights,
+): void {
+  while (pending.length > 0) {
+    const exp = pending.shift();
+    if (!exp) break;
+    const state = encodeBoardFlat(exp.prevCells);
+    const nextState = encodeBoardFlat(nextCells);
+    const reward = calculateReward(
+      exp.prevCells, nextCells, exp.prevScore, nextScore, done, weights,
+    );
+    worker.postMessage({
+      type: "REMEMBER",
+      experience: { state, action: exp.actionIndex, reward, nextState, done },
+    } satisfies WorkerInMessage);
+    worker.postMessage({ type: "TRAIN_STEP" } satisfies WorkerInMessage);
+  }
+}
+
+/**
  * Manages an AI Web Worker that runs the DQN agent in a separate thread.
  *
  * Changes from the original single-game version:
@@ -289,18 +318,14 @@ export default function useAiPlayer(
       }
       // Still drain any final experience from the last move
       if (worker && pendingExpsRef.current.length > 0) {
-        while (pendingExpsRef.current.length > 0) {
-          const exp = pendingExpsRef.current.shift();
-          if (!exp) break;
-          const state = encodeBoardFlat(exp.prevCells);
-          const nextState = encodeBoardFlat(cells);
-          const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score, true, rewardWeightsRef.current);
-          worker.postMessage({
-            type: "REMEMBER",
-            experience: { state, action: exp.actionIndex, reward, nextState, done: true },
-          } satisfies WorkerInMessage);
-          worker.postMessage({ type: "TRAIN_STEP" } satisfies WorkerInMessage);
-        }
+        drainExperiences(
+          worker,
+          pendingExpsRef.current,
+          cells,
+          score,
+          true,
+          rewardWeightsRef.current,
+        );
       }
       return;
     }
@@ -317,19 +342,14 @@ export default function useAiPlayer(
 
     // Normal game running: drain pending experiences
     if (worker && pendingExpsRef.current.length > 0) {
-      while (pendingExpsRef.current.length > 0) {
-        const exp = pendingExpsRef.current.shift();
-        if (!exp) break;
-        const state = encodeBoardFlat(exp.prevCells);
-        const nextState = encodeBoardFlat(cells);
-        const done = isGameOver(cells);
-        const reward = calculateReward(exp.prevCells, cells, exp.prevScore, score, done, rewardWeightsRef.current);
-        worker.postMessage({
-          type: "REMEMBER",
-          experience: { state, action: exp.actionIndex, reward, nextState, done },
-        } satisfies WorkerInMessage);
-        worker.postMessage({ type: "TRAIN_STEP" } satisfies WorkerInMessage);
-      }
+      drainExperiences(
+        worker,
+        pendingExpsRef.current,
+        cells,
+        score,
+        false, // not game-over – the early return above handles that branch
+        rewardWeightsRef.current,
+      );
       // Schedule next move now that the experience has been recorded
       if (aiEnabledRef.current) {
         scheduleNextMove();
