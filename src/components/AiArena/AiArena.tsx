@@ -9,11 +9,13 @@ import type { Cell, Coordinate } from "../../types";
 import addNewCell from "../../utils/addNewCell";
 import tilt from "../../utils/tilt";
 import useAiPlayer from "../../hooks/useAiPlayer";
+import { BEST_MODEL_KEY, POLICY_MODEL_KEY } from "../../hooks/useAiPlayer";
 import Grid from "../Grid/Grid";
 import { isGameOver } from "../../ai/rewardUtils";
 import { REWARD_WEIGHTS } from "../../ai/rewardUtils";
 import type { RewardWeights } from "../../ai/rewardUtils";
 import { getRandomFunnyName } from "../../utils/funnyNames";
+import { deleteModelArtifact, downloadJson, downloadModelJson } from "../../utils/modelStorage";
 import styles from "./styles.module.css";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -23,6 +25,7 @@ export interface LeaderboardEntry {
   name: string;
   score: number;
   achievedAt: string; // ISO date string for easy localStorage serialisation
+  rewardWeights?: RewardWeights;
 }
 
 const LEADERBOARD_KEY = "2048-leaderboard";
@@ -358,6 +361,7 @@ export default function AiArena() {
         name: getRandomFunnyName(),
         score,
         achievedAt: new Date().toISOString(),
+        rewardWeights: slotWeights,
       };
       setLeaderboard((prev) =>
         [...prev, entry]
@@ -394,6 +398,30 @@ export default function AiArena() {
     bestScoreRef.current = 0;
   }, []);
 
+  const clearAll = useCallback(() => {
+    // Clear all persisted data: localStorage + IndexedDB models.
+    localStorage.removeItem(LEADERBOARD_KEY);
+    localStorage.removeItem(STATS_KEY);
+    void deleteModelArtifact(BEST_MODEL_KEY).catch(() => {});
+    void deleteModelArtifact(POLICY_MODEL_KEY).catch(() => {});
+    // Reset all in-memory state.
+    setLeaderboard([]);
+    setStats({ totalModels: 0, totalIterations: 0 });
+    bestScoreRef.current = 0;
+    setBestWeights({ ...REWARD_WEIGHTS });
+    setRestartTrigger((t) => t + 1);
+  }, []);
+
+  const exportBestModel = useCallback(() => {
+    void downloadModelJson(
+      BEST_MODEL_KEY,
+      { rewardWeights: bestWeights },
+      "2048-best-model.json",
+    ).then((found) => {
+      if (!found) alert("No saved model found yet – the model is saved automatically every 100 training steps. Let the AI play a little longer.");
+    });
+  }, [bestWeights]);
+
   return (
     <div className={styles.arena}>
       {/* ── Controls ── */}
@@ -428,6 +456,9 @@ export default function AiArena() {
             onClick={toggleSpeedMode}
           >
             {speedMode ? "⚡ Speed ON" : "⚡ Speed OFF"}
+          </button>
+          <button className={`${styles.actionBtn} ${styles.actionBtnDanger}`} onClick={clearAll}>
+            🗑 Clear All
           </button>
         </div>
 
@@ -493,11 +524,16 @@ export default function AiArena() {
       <div className={styles.leaderboard}>
         <div className={styles.leaderboardHeader}>
           <span>🏆 Leaderboard</span>
-          {leaderboard.length > 0 && (
-            <button className={styles.clearBtn} onClick={clearLeaderboard}>
-              Clear
+          <div className={styles.leaderboardHeaderActions}>
+            <button className={styles.exportModelBtn} onClick={exportBestModel}>
+              📥 Export Model
             </button>
-          )}
+            {leaderboard.length > 0 && (
+              <button className={styles.clearBtn} onClick={clearLeaderboard}>
+                Clear
+              </button>
+            )}
+          </div>
         </div>
         {leaderboard.length === 0 ? (
           <p className={styles.leaderboardEmpty}>
@@ -520,6 +556,16 @@ export default function AiArena() {
                     minute: "2-digit",
                   })}
                 </span>
+                <button
+                  className={styles.exportEntryBtn}
+                  title="Export weights as JSON"
+                  onClick={() => {
+                    const { id: _id, ...exportable } = entry;
+                    downloadJson(exportable, `2048-weights-${entry.score}.json`);
+                  }}
+                >
+                  ⬇
+                </button>
               </li>
             ))}
           </ol>

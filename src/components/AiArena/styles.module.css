@@ -94,6 +94,17 @@
   color: #fff;
 }
 
+.actionBtnDanger {
+  border-color: #c0392b;
+  color: #e74c3c;
+}
+
+.actionBtnDanger:hover {
+  background: #c0392b;
+  border-color: #c0392b;
+  color: #fff;
+}
+
 /* ── Game grid ─────────────────────────────────────────────────────────────── */
 
 .gamesGrid {
@@ -190,6 +201,12 @@
   margin-bottom: 8px;
 }
 
+.leaderboardHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .clearBtn {
   font-size: 12px;
   padding: 3px 10px;
@@ -203,6 +220,37 @@
 .clearBtn:hover {
   color: #f67b5e;
   border-color: #f67b5e;
+}
+
+.exportModelBtn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid #4d4438;
+  border-radius: 5px;
+  background: transparent;
+  color: #c8b8ac;
+  cursor: pointer;
+}
+
+.exportModelBtn:hover {
+  color: #e0c870;
+  border-color: #e0c870;
+}
+
+.exportEntryBtn {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid #4d4438;
+  border-radius: 4px;
+  background: transparent;
+  color: #6a5e54;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.exportEntryBtn:hover {
+  color: #e0c870;
+  border-color: #e0c870;
 }
 
 .leaderboardEmpty {
@@ -224,7 +272,7 @@
 
 .leaderboardEntry {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto;
+  grid-template-columns: 28px 1fr auto auto auto;
   align-items: center;
   gap: 8px;
   font-size: 13px;

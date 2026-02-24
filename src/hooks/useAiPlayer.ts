@@ -11,8 +11,8 @@ import { getMoveInterval } from "../utils/moveInterval";
 const SAVE_EVERY = 100;
 
 /** Shared model keys stored in IndexedDB. */
-const BEST_MODEL_KEY = "2048-dqn-best";
-const POLICY_MODEL_KEY = "2048-dqn-policy";
+export const BEST_MODEL_KEY = "2048-dqn-best";
+export const POLICY_MODEL_KEY = "2048-dqn-policy";
 
 export interface UseAiPlayerOptions {
   /** Called once when the board reaches a game-over state. */
