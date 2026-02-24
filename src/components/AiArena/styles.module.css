@@ -325,3 +325,30 @@
   color: #c8b8ac;
   margin-bottom: 4px;
 }
+
+.scoreStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 6px;
+}
+
+.scoreStatItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+}
+
+.scoreStatLabel {
+  font-size: 10px;
+  color: #6a5e54;
+  white-space: nowrap;
+}
+
+.scoreStatValue {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f49463;
+  white-space: nowrap;
+}

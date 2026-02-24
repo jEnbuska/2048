@@ -35,7 +35,7 @@ const SCORE_HISTORY_KEY = "2048-score-history";
 const MAX_LEADERBOARD = 10;
 const MAX_WORKERS = 16;
 /** Maximum number of game scores retained in the performance graph. */
-const MAX_SCORE_HISTORY = 200;
+const MAX_SCORE_HISTORY = 10_000;
 
 /**
  * Number of top-performing weight configurations kept in the elite pool.
@@ -153,17 +153,28 @@ function generateEvolved(pool: EliteEntry[], fallback: RewardWeights): RewardWei
 interface ArenaStats {
   totalModels: number;
   totalIterations: number;
+  /** Running sum of all non-zero game scores (for the all-time average). */
+  allTimeSum: number;
+  /** Count of all non-zero game scores recorded (for the all-time average). */
+  allTimeCount: number;
 }
 
 function loadStats(): ArenaStats {
   try {
     const raw = localStorage.getItem(STATS_KEY);
-    return raw
-      ? (JSON.parse(raw) as ArenaStats)
-      : { totalModels: 0, totalIterations: 0 };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ArenaStats>;
+      return {
+        totalModels: parsed.totalModels ?? 0,
+        totalIterations: parsed.totalIterations ?? 0,
+        allTimeSum: parsed.allTimeSum ?? 0,
+        allTimeCount: parsed.allTimeCount ?? 0,
+      };
+    }
   } catch {
-    return { totalModels: 0, totalIterations: 0 };
+    // fall through
   }
+  return { totalModels: 0, totalIterations: 0, allTimeSum: 0, allTimeCount: 0 };
 }
 
 function saveStats(stats: ArenaStats) {
@@ -397,6 +408,51 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
   );
 });
 
+// ─── ScoreStats ───────────────────────────────────────────────────────────────
+
+/** Displays the historical score averages for 4 rolling windows. */
+function windowAvg(scores: number[], n: number): number | null {
+  const slice = n > 0 ? scores.slice(-n) : scores;
+  if (slice.length === 0) return null;
+  return slice.reduce((s, v) => s + v, 0) / slice.length;
+}
+
+interface ScoreStatsProps {
+  scoreHistory: number[];
+  stats: ArenaStats;
+}
+
+function ScoreStats({ scoreHistory, stats }: ScoreStatsProps) {
+  const allTimeAvg =
+    stats.allTimeCount > 0 ? stats.allTimeSum / stats.allTimeCount : null;
+  const windows: Array<{ label: string; n: number }> = [
+    { label: "Last 100", n: 100 },
+    { label: "Last 1,000", n: 1_000 },
+    { label: "Last 10,000", n: 10_000 },
+  ];
+  return (
+    <div className={styles.scoreStats}>
+      <div className={styles.scoreStatItem}>
+        <span className={styles.scoreStatLabel}>All-time</span>
+        <span className={styles.scoreStatValue}>
+          {allTimeAvg !== null ? Math.round(allTimeAvg).toLocaleString() : "—"}
+        </span>
+      </div>
+      {windows.map(({ label, n }) => {
+        const value = scoreHistory.length > 0 ? windowAvg(scoreHistory, n) : null;
+        return (
+          <div key={label} className={styles.scoreStatItem}>
+            <span className={styles.scoreStatLabel}>{label}</span>
+            <span className={styles.scoreStatValue}>
+              {value !== null ? Math.round(value).toLocaleString() : "—"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── AiArena ─────────────────────────────────────────────────────────────────
 
 export default function AiArena() {
@@ -487,6 +543,13 @@ export default function AiArena() {
       // Skip trivial scores (game ended before making any moves).
       if (score === 0) return;
 
+      // Accumulate all-time running totals.
+      setStats((prev) => ({
+        ...prev,
+        allTimeSum: prev.allTimeSum + score,
+        allTimeCount: prev.allTimeCount + 1,
+      }));
+
       // Track score in history for the performance graph.
       setScoreHistory((prev) => {
         const next = [...prev, score];
@@ -563,7 +626,7 @@ export default function AiArena() {
     void deleteModelArtifact(POLICY_MODEL_KEY).catch(() => {});
     // Reset all in-memory state.
     setLeaderboard([]);
-    setStats({ totalModels: 0, totalIterations: 0 });
+    setStats({ totalModels: 0, totalIterations: 0, allTimeSum: 0, allTimeCount: 0 });
     setScoreHistory([]);
     bestScoreRef.current = 0;
     elitePoolRef.current = [];
@@ -667,6 +730,7 @@ export default function AiArena() {
         <div className={styles.scoreGraph}>
           <span className={styles.scoreGraphTitle}>📈 Score History</span>
           <ScoreGraph scores={scoreHistory} />
+          <ScoreStats scoreHistory={scoreHistory} stats={stats} />
         </div>
       )}
 
