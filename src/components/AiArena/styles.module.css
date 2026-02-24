@@ -306,3 +306,22 @@
   color: #6a5e54;
   white-space: nowrap;
 }
+
+/* ── Score Graph ───────────────────────────────────────────────────────────── */
+
+.scoreGraph {
+  width: 100%;
+  max-width: 900px;
+  background: #2c251d;
+  border-radius: 10px;
+  padding: 10px 14px 6px;
+  box-sizing: border-box;
+}
+
+.scoreGraphTitle {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #c8b8ac;
+  margin-bottom: 4px;
+}

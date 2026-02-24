@@ -16,6 +16,7 @@ import { REWARD_WEIGHTS } from "../../ai/rewardUtils";
 import type { RewardWeights } from "../../ai/rewardUtils";
 import { getRandomFunnyName } from "../../utils/funnyNames";
 import { deleteModelArtifact, downloadJson, downloadModelJson } from "../../utils/modelStorage";
+import ScoreGraph from "./ScoreGraph";
 import styles from "./styles.module.css";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -30,8 +31,17 @@ export interface LeaderboardEntry {
 
 const LEADERBOARD_KEY = "2048-leaderboard";
 const STATS_KEY = "2048-arena-stats";
+const SCORE_HISTORY_KEY = "2048-score-history";
 const MAX_LEADERBOARD = 10;
 const MAX_WORKERS = 16;
+/** Maximum number of game scores retained in the performance graph. */
+const MAX_SCORE_HISTORY = 200;
+
+/**
+ * Number of top-performing weight configurations kept in the elite pool.
+ * Genetic operators (crossover / selection) draw parents from this pool.
+ */
+const ELITE_POOL_SIZE = 6;
 
 /**
  * Random perturbation magnitude for reward weights (±40 %).
@@ -42,18 +52,35 @@ const MAX_WORKERS = 16;
  */
 const PERTURB_MAGNITUDE = 0.4;
 
+// Perturbation magnitudes for genetic strategies (smaller = more exploitation).
+const ELITISM_MUTATION = 0.1;
+const CROSSOVER_MUTATION = 0.2;
+
+// Roulette thresholds for the three genetic strategies in generateEvolved().
+const ELITISM_THRESHOLD = 0.33;
+const CROSSOVER_THRESHOLD = 0.66;
+
+// ─── Elite pool entry ─────────────────────────────────────────────────────────
+
+interface EliteEntry {
+  weights: RewardWeights;
+  score: number;
+}
+
+// ─── Genetic helpers ──────────────────────────────────────────────────────────
+
 /**
  * Returns a copy of `base` where every weight is randomly perturbed by up to
- * ±`PERTURB_MAGNITUDE × 100` %.  Floors keep values in a sensible range.
+ * ±`magnitude × 100` %.  Floors keep values in a sensible range.
  */
-function perturbWeights(base: RewardWeights): RewardWeights {
+function perturbWeights(base: RewardWeights, magnitude = PERTURB_MAGNITUDE): RewardWeights {
   const p = (v: number) =>
-    Math.max(0.1, v * (1 + (Math.random() * 2 - 1) * PERTURB_MAGNITUDE));
+    Math.max(0.1, v * (1 + (Math.random() * 2 - 1) * magnitude));
   // gameOverPenalty is negative; perturb its magnitude, then negate.
   const penaltyMagnitude = Math.abs(base.gameOverPenalty);
   const perturbedPenalty = -Math.max(
     0.5,
-    penaltyMagnitude * (1 + (Math.random() * 2 - 1) * PERTURB_MAGNITUDE),
+    penaltyMagnitude * (1 + (Math.random() * 2 - 1) * magnitude),
   );
   return {
     mergeBonus: p(base.mergeBonus),
@@ -64,6 +91,61 @@ function perturbWeights(base: RewardWeights): RewardWeights {
     maxTileBonus: p(base.maxTileBonus),
     gameOverPenalty: perturbedPenalty,
   };
+}
+
+/**
+ * Uniform crossover: each weight is independently taken from either parent
+ * with 50 % probability.
+ */
+function crossoverWeights(a: RewardWeights, b: RewardWeights): RewardWeights {
+  const pick = <T,>(x: T, y: T): T => (Math.random() < 0.5 ? x : y);
+  return {
+    mergeBonus: pick(a.mergeBonus, b.mergeBonus),
+    emptyTiles: pick(a.emptyTiles, b.emptyTiles),
+    monotonicity: pick(a.monotonicity, b.monotonicity),
+    cornerBonus: pick(a.cornerBonus, b.cornerBonus),
+    smoothness: pick(a.smoothness, b.smoothness),
+    maxTileBonus: pick(a.maxTileBonus, b.maxTileBonus),
+    gameOverPenalty: pick(a.gameOverPenalty, b.gameOverPenalty),
+  };
+}
+
+/**
+ * Fitness-proportionate (roulette-wheel) selection from the elite pool.
+ * Higher-scoring elites are more likely to be chosen as a parent.
+ */
+function selectElite(pool: EliteEntry[], fallback: RewardWeights): RewardWeights {
+  if (pool.length === 0) return { ...fallback };
+  const totalFitness = pool.reduce((s, e) => s + Math.max(1, e.score), 0);
+  let r = Math.random() * totalFitness;
+  for (const e of pool) {
+    r -= Math.max(1, e.score);
+    if (r <= 0) return e.weights;
+  }
+  return pool[pool.length - 1].weights;
+}
+
+/**
+ * Generate evolved weights for a new agent using a mix of genetic strategies:
+ *  • ~33 % – Elitism: copy the best elite with very small perturbation (±10 %)
+ *  • ~33 % – Crossover: blend two fitness-selected parents, then mutate (±20 %)
+ *  • ~34 % – Exploration: fitness-selected elite + standard mutation (±40 %)
+ */
+function generateEvolved(pool: EliteEntry[], fallback: RewardWeights): RewardWeights {
+  if (pool.length === 0) return perturbWeights(fallback);
+  const r = Math.random();
+  if (r < ELITISM_THRESHOLD) {
+    // Elitism: copy top performer with minimal perturbation
+    return perturbWeights(pool[0].weights, ELITISM_MUTATION);
+  }
+  if (r < CROSSOVER_THRESHOLD && pool.length >= 2) {
+    // Crossover two fitness-proportionate parents, then lightly mutate
+    const pa = selectElite(pool, fallback);
+    const pb = selectElite(pool, fallback);
+    return perturbWeights(crossoverWeights(pa, pb), CROSSOVER_MUTATION);
+  }
+  // Exploration: fitness-proportionate selection + standard mutation
+  return perturbWeights(selectElite(pool, fallback));
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -109,6 +191,26 @@ function saveLeaderboard(entries: LeaderboardEntry[]) {
   }
 }
 
+function loadScoreHistory(): number[] {
+  try {
+    const raw = localStorage.getItem(SCORE_HISTORY_KEY);
+    return raw ? (JSON.parse(raw) as number[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveScoreHistory(history: number[]) {
+  try {
+    localStorage.setItem(
+      SCORE_HISTORY_KEY,
+      JSON.stringify(history.slice(-MAX_SCORE_HISTORY)),
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
 // ─── ArenaGameSlot ────────────────────────────────────────────────────────────
 
 /** Combined state for the slot – avoids a separate display state and
@@ -140,8 +242,10 @@ interface ArenaGameSlotProps {
    * at most once every 50 ms.
    */
   speedMode: boolean;
-  onGameOver: (score: number, saveAsBest: () => void, weights: RewardWeights) => void;
+  onGameOver: (id: number, score: number, saveAsBest: () => void, weights: RewardWeights) => void;
   onTrainStep: () => void;
+  /** Only called for slot 0; reports the TF.js backend ("webgl" / "cpu"). */
+  onBackendDetected?: (backend: string) => void;
 }
 
 const ArenaGameSlot = memo(function ArenaGameSlot({
@@ -151,6 +255,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
   speedMode,
   onGameOver,
   onTrainStep,
+  onBackendDetected,
 }: ArenaGameSlotProps) {
   const [state, setState] = useState<SlotState>(createSlotState);
   const [restartCount, setRestartCount] = useState(0);
@@ -226,9 +331,9 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
 
   const handleGameOver = useCallback(
     (finalScore: number, saveAsBest: () => void) => {
-      onGameOver(finalScore, saveAsBest, rewardWeights);
+      onGameOver(id, finalScore, saveAsBest, rewardWeights);
     },
-    [onGameOver, rewardWeights],
+    [id, onGameOver, rewardWeights],
   );
 
   const { aiEnabled, toggleAi, workerReady, saveAsBest } = useAiPlayer(
@@ -241,6 +346,7 @@ const ArenaGameSlot = memo(function ArenaGameSlot({
       restartTrigger: restartCount,
       rewardWeights,
       speedMode,
+      onBackendDetected,
     },
   );
 
@@ -307,10 +413,29 @@ export default function AiArena() {
 
   const [stats, setStats] = useState<ArenaStats>(loadStats);
 
+  // ── Score history (for performance graph) ─────────────────────────────────
+  const [scoreHistory, setScoreHistory] = useState<number[]>(loadScoreHistory);
+
+  // Persist score history whenever it changes
+  useEffect(() => {
+    saveScoreHistory(scoreHistory);
+  }, [scoreHistory]);
+
+  // ── Backend label (reported by the first worker) ──────────────────────────
+  const [backendLabel, setBackendLabel] = useState<string | null>(null);
+  const handleBackendDetected = useCallback((backend: string) => {
+    const label =
+      backend === "webgl" ? "🟢 GPU (WebGL)"
+      : backend === "wasm" ? "🟡 WASM"
+      : `🟡 ${backend.toUpperCase()}`;
+    setBackendLabel(label);
+  }, []);
+
+  // ── Elite pool (in memory) ─────────────────────────────────────────────────
+  // Top-N weight configurations ranked by score; rebuilt on every game-over.
+  const elitePoolRef = useRef<EliteEntry[]>([]);
+
   // ── Reward-weight evolution ────────────────────────────────────────────────
-  // Each slot starts with a randomly perturbed copy of the current best weights.
-  // When a slot achieves a new overall high score its weights become the new
-  // base so subsequent slots explore the nearby hyperparameter neighbourhood.
   const [bestWeights, setBestWeights] = useState<RewardWeights>(
     () => ({ ...REWARD_WEIGHTS }),
   );
@@ -319,8 +444,8 @@ export default function AiArena() {
     bestWeightsRef.current = bestWeights;
   }, [bestWeights]);
 
-  // Stable per-slot weight arrays.  Initialised on mount with perturbed defaults
-  // and regenerated (from the latest best weights) on every full restart.
+  // Stable per-slot weight arrays.  Initialised on mount with evolved weights
+  // and regenerated (from the latest best/elite weights) on every full restart.
   const [slotWeights, setSlotWeights] = useState<RewardWeights[]>(() =>
     Array.from({ length: MAX_WORKERS }, () => perturbWeights(REWARD_WEIGHTS)),
   );
@@ -329,7 +454,9 @@ export default function AiArena() {
   // generation explores a different neighbourhood around the best-known weights.
   useEffect(() => {
     setSlotWeights(
-      Array.from({ length: MAX_WORKERS }, () => perturbWeights(bestWeightsRef.current)),
+      Array.from({ length: MAX_WORKERS }, () =>
+        generateEvolved(elitePoolRef.current, bestWeightsRef.current),
+      ),
     );
   }, [restartTrigger]);
 
@@ -344,10 +471,11 @@ export default function AiArena() {
   }, [leaderboard]);
 
   const handleGameOver = useCallback(
-    (score: number, saveAsBest: () => void, slotWeights: RewardWeights) => {
+    (slotId: number, score: number, saveAsBest: () => void, slotWeights: RewardWeights) => {
       // Functional update ensures concurrent game-overs from multiple workers
       // are queued and processed sequentially without losing counts.
       setStats((prev) => ({ ...prev, totalModels: prev.totalModels + 1 }));
+
       if (score > bestScoreRef.current) {
         bestScoreRef.current = score;
         saveAsBest();
@@ -355,7 +483,35 @@ export default function AiArena() {
         // generation of slots explores the surrounding hyperparameter region.
         setBestWeights(slotWeights);
       }
-      if (score === 0) return; // Skip trivial scores
+
+      // Skip trivial scores (game ended before making any moves).
+      if (score === 0) return;
+
+      // Track score in history for the performance graph.
+      setScoreHistory((prev) => {
+        const next = [...prev, score];
+        return next.length > MAX_SCORE_HISTORY ? next.slice(-MAX_SCORE_HISTORY) : next;
+      });
+
+      // Update elite pool with this game's result.
+      elitePoolRef.current = [
+        ...elitePoolRef.current,
+        { weights: slotWeights, score },
+      ]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, ELITE_POOL_SIZE);
+
+      // Evolve weights for the completed slot's next game.
+      setSlotWeights((prev) => {
+        const next = [...prev];
+        next[slotId] = generateEvolved(
+          elitePoolRef.current,
+          bestWeightsRef.current,
+        );
+        return next;
+      });
+
+      // Add to leaderboard.
       const entry: LeaderboardEntry = {
         id: crypto.randomUUID(),
         name: getRandomFunnyName(),
@@ -402,12 +558,15 @@ export default function AiArena() {
     // Clear all persisted data: localStorage + IndexedDB models.
     localStorage.removeItem(LEADERBOARD_KEY);
     localStorage.removeItem(STATS_KEY);
+    localStorage.removeItem(SCORE_HISTORY_KEY);
     void deleteModelArtifact(BEST_MODEL_KEY).catch(() => {});
     void deleteModelArtifact(POLICY_MODEL_KEY).catch(() => {});
     // Reset all in-memory state.
     setLeaderboard([]);
     setStats({ totalModels: 0, totalIterations: 0 });
+    setScoreHistory([]);
     bestScoreRef.current = 0;
+    elitePoolRef.current = [];
     setBestWeights({ ...REWARD_WEIGHTS });
     setRestartTrigger((t) => t + 1);
   }, []);
@@ -469,6 +628,11 @@ export default function AiArena() {
           <span className={styles.controlLabel}>
             Iterations: {stats.totalIterations.toLocaleString()}
           </span>
+          {backendLabel && (
+            <span className={styles.controlLabel} title="TensorFlow.js compute backend">
+              {backendLabel}
+            </span>
+          )}
         </div>
 
         {/* Best weights display – updates whenever a new high-score worker wins */}
@@ -498,6 +662,14 @@ export default function AiArena() {
         </div>
       </div>
 
+      {/* ── Performance graph ── */}
+      {scoreHistory.length >= 2 && (
+        <div className={styles.scoreGraph}>
+          <span className={styles.scoreGraphTitle}>📈 Score History</span>
+          <ScoreGraph scores={scoreHistory} />
+        </div>
+      )}
+
       {/* ── Game grid ── */}
       <div
         className={styles.gamesGrid}
@@ -516,6 +688,7 @@ export default function AiArena() {
             speedMode={speedMode}
             onGameOver={handleGameOver}
             onTrainStep={handleTrainStep}
+            onBackendDetected={id === 0 ? handleBackendDetected : undefined}
           />
         ))}
       </div>

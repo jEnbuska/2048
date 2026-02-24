@@ -36,6 +36,11 @@ export interface UseAiPlayerOptions {
    * how often to re-render – see ArenaGameSlot's display-state logic.
    */
   speedMode?: boolean;
+  /**
+   * Called once with the TF.js backend name (e.g. "webgl", "cpu") when the
+   * worker reports that it is ready.  Useful for displaying GPU/CPU status.
+   */
+  onBackendDetected?: (backend: string) => void;
 }
 
 export interface UseAiPlayerReturn {
@@ -113,6 +118,11 @@ export default function useAiPlayer(
     onTrainStepRef.current = options.onTrainStep;
   }, [options.onTrainStep]);
 
+  const onBackendDetectedRef = useRef(options.onBackendDetected);
+  useEffect(() => {
+    onBackendDetectedRef.current = options.onBackendDetected;
+  }, [options.onBackendDetected]);
+
   // Keep the latest reward weights in a ref so experience calculations always
   // use the value current at the time of the move, without needing re-renders.
   const rewardWeightsRef = useRef<RewardWeights>(options.rewardWeights ?? REWARD_WEIGHTS);
@@ -182,6 +192,7 @@ export default function useAiPlayer(
       switch (msg.type) {
         case "READY":
           setWorkerReady(true);
+          onBackendDetectedRef.current?.(msg.backend);
           // Try loading best model first, then regular policy
           loadAttemptRef.current = "best";
           worker.postMessage({

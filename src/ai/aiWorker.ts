@@ -23,7 +23,7 @@
  *   { type: "ERROR",         message: string }
  */
 
-import "@tensorflow/tfjs"; // registers WebGL / CPU backend
+import * as tf from "@tensorflow/tfjs"; // registers WebGL / CPU backend
 import { DQNAgent, ACTIONS } from "./dqnAgent";
 import type { DQNConfig, Experience } from "./dqnAgent";
 import { encodeBoardFlat } from "./encoding";
@@ -41,7 +41,7 @@ export type WorkerInMessage =
   | { type: "LOAD_MODEL"; key?: string };
 
 export type WorkerOutMessage =
-  | { type: "READY" }
+  | { type: "READY"; backend: string }
   | { type: "ACTION"; direction: TiltDirection; actionIndex: number }
   | { type: "TRAIN_RESULT"; loss: number | null }
   | { type: "SAVE_DONE" }
@@ -57,8 +57,18 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
   try {
     switch (msg.type) {
       case "INIT":
+        // Prefer GPU acceleration via WebGL; fall back to CPU automatically.
+        try {
+          await tf.setBackend("webgl");
+        } catch {
+          // WebGL not available in this environment – CPU fallback is fine.
+        }
+        await tf.ready();
         agent = new DQNAgent(msg.config);
-        self.postMessage({ type: "READY" } satisfies WorkerOutMessage);
+        self.postMessage({
+          type: "READY",
+          backend: tf.getBackend(),
+        } satisfies WorkerOutMessage);
         break;
 
       case "SELECT_ACTION": {
