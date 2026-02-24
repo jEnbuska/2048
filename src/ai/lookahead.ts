@@ -38,6 +38,19 @@ export const LOOKAHEAD_DISCOUNT = 0.9;
  */
 export const LOOKAHEAD_WEIGHT = 0.6;
 
+/**
+ * Additive bias applied to the lookahead score for preferred swipe directions.
+ *
+ * Default preference : Left and Up.
+ * Exception           : when the chain tail sits on the bottom row,
+ *                       prefer Left and Down (not Up).
+ *
+ * The value is calibrated against typical single-step heuristic sums
+ * (≈ 14 max) so it is "big" enough to steer the AI but still lets the
+ * heuristic override it when another direction is clearly much better.
+ */
+export const DIRECTION_BIAS = 5.0;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -75,6 +88,71 @@ function boardKey(cells: Cell[]): string {
  */
 function normalizeTiltResult(cells: Cell[]): Cell[] {
   return cells.filter((c) => !c.consumedBy);
+}
+
+/**
+ * Walks the longest descending chain from the highest-value tile.
+ *
+ * Starting at the max tile, each step moves to an orthogonally adjacent cell
+ * whose value is exactly half the current cell's value.  Returns the last
+ * cell reached (the "chain tail").  Returns null when the board is empty.
+ */
+function findChainTail(cells: Cell[]): Cell | null {
+  if (!cells.length) return null;
+  const maxVal = Math.max(...cells.map((c) => c.value));
+  let current = cells.find((c) => c.value === maxVal)!;
+  const visited = new Set<number>([current.id]);
+
+  while (true) {
+    const targetVal = current.value / 2;
+    // Stop when the next expected value would be below the minimum tile (2).
+    // A tile with value 2 can still be the tail: we move to it, then on the
+    // following iteration targetVal becomes 1 < 2 and we break, returning
+    // the 2-valued cell as the tail.
+    if (targetVal < 2) break;
+    const next = cells.find(
+      (c) =>
+        !visited.has(c.id) &&
+        c.value === targetVal &&
+        Math.abs(c.x - current.x) + Math.abs(c.y - current.y) === 1,
+    );
+    if (!next) break;
+    visited.add(next.id);
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * Returns a per-action bias array (indexed like ACTIONS: Up=0, Down=1,
+ * Left=2, Right=3) to nudge the AI toward preferred swipe directions.
+ *
+ * Default preference  : Left and Up.
+ * Exception            : when the chain tail sits on the bottom row
+ *                        (y === GRID_SIZE − 1), prefer Left and Down instead.
+ *
+ * The bias is additive and applied to the raw lookahead score before the
+ * DQN blending step, so the heuristic can still override it when another
+ * direction is clearly superior.
+ */
+export function computeDirectionBias(cells: Cell[]): number[] {
+  // ACTIONS order: [Up=0, Down=1, Left=2, Right=3]
+  const bias = [0, 0, 0, 0];
+  // Left is always preferred.
+  bias[2] = DIRECTION_BIAS;
+
+  const active = cells.filter((c) => !c.consumedBy);
+  const tail = findChainTail(active);
+
+  if (tail !== null && tail.y === GRID_SIZE - 1) {
+    // Chain tail is on the bottom row: prefer Down, not Up.
+    bias[1] = DIRECTION_BIAS;
+  } else {
+    // Default: prefer Up.
+    bias[0] = DIRECTION_BIAS;
+  }
+
+  return bias;
 }
 
 // ─── Recursive lookahead ─────────────────────────────────────────────────────
@@ -129,14 +207,16 @@ export function computeLookaheadScores(
 ): number[] {
   const normalized = normalizeTiltResult(cells);
   const key = boardKey(normalized);
+  const bias = computeDirectionBias(normalized);
 
-  return (ACTIONS as TiltDirection[]).map((direction) => {
+  return (ACTIONS as TiltDirection[]).map((direction, i) => {
     const vector = get2DVectorByTiltDirection(direction);
     const next = normalizeTiltResult(tilt(vector, normalized));
     if (boardKey(next) === key) return -Infinity; // no-op
     return (
       boardHeuristicValue(next) +
-      LOOKAHEAD_DISCOUNT * lookaheadValue(next, depth - 1)
+      LOOKAHEAD_DISCOUNT * lookaheadValue(next, depth - 1) +
+      bias[i]
     );
   });
 }

@@ -2,9 +2,11 @@ import { describe, test, expect } from "vitest";
 import {
   boardHeuristicValue,
   computeLookaheadScores,
+  computeDirectionBias,
   LOOKAHEAD_DEPTH,
   LOOKAHEAD_DISCOUNT,
   LOOKAHEAD_WEIGHT,
+  DIRECTION_BIAS,
 } from "./lookahead";
 import { GRID_SIZE } from "../constants";
 import type { Cell } from "../types";
@@ -173,5 +175,79 @@ describe("lookahead constants", () => {
   test("LOOKAHEAD_WEIGHT is in (0, 1)", () => {
     expect(LOOKAHEAD_WEIGHT).toBeGreaterThan(0);
     expect(LOOKAHEAD_WEIGHT).toBeLessThan(1);
+  });
+
+  test("DIRECTION_BIAS is a positive number", () => {
+    expect(DIRECTION_BIAS).toBeGreaterThan(0);
+  });
+});
+
+// ─── computeDirectionBias ─────────────────────────────────────────────────────
+
+describe("computeDirectionBias", () => {
+  test("returns an array of 4 numbers", () => {
+    const bias = computeDirectionBias([cell(1, 0, 0, 128), cell(2, 1, 0, 64)]);
+    expect(bias).toHaveLength(4);
+  });
+
+  test("Left (index 2) always receives DIRECTION_BIAS regardless of board", () => {
+    // Default case
+    expect(computeDirectionBias([cell(1, 0, 0, 128), cell(2, 1, 0, 64)])[2]).toBe(DIRECTION_BIAS);
+    // Bottom-row-tail case
+    const bottomChain = [
+      cell(1, 0, 0, 128),
+      cell(2, 1, 0, 64),
+      cell(3, 2, 0, 32),
+      cell(4, 3, 0, 16),
+      cell(5, 3, 1, 8),
+      cell(6, 3, 2, 4),
+      cell(7, 3, 3, 2),
+    ];
+    expect(computeDirectionBias(bottomChain)[2]).toBe(DIRECTION_BIAS);
+  });
+
+  test("Up (index 0) receives DIRECTION_BIAS when chain tail is NOT on the bottom row", () => {
+    // Chain: 128 → 64, both on row 0 – tail at (1,0), not bottom.
+    const bias = computeDirectionBias([cell(1, 0, 0, 128), cell(2, 1, 0, 64)]);
+    expect(bias[0]).toBe(DIRECTION_BIAS); // Up biased
+    expect(bias[1]).toBe(0);              // Down not biased
+  });
+
+  test("Down (index 1) receives DIRECTION_BIAS when chain tail IS on the bottom row", () => {
+    // Descending chain ending at y=3 (GRID_SIZE-1).
+    const cells = [
+      cell(1, 0, 0, 128),
+      cell(2, 1, 0, 64),
+      cell(3, 2, 0, 32),
+      cell(4, 3, 0, 16),
+      cell(5, 3, 1, 8),
+      cell(6, 3, 2, 4),
+      cell(7, 3, 3, 2), // tail at y=3 (bottom row)
+    ];
+    const bias = computeDirectionBias(cells);
+    expect(bias[1]).toBe(DIRECTION_BIAS); // Down biased
+    expect(bias[0]).toBe(0);              // Up not biased
+  });
+
+  test("empty board defaults to Left+Up bias", () => {
+    const bias = computeDirectionBias([]);
+    expect(bias[2]).toBe(DIRECTION_BIAS); // Left
+    expect(bias[0]).toBe(DIRECTION_BIAS); // Up
+    expect(bias[1]).toBe(0);              // not Down
+    expect(bias[3]).toBe(0);              // not Right
+  });
+
+  test("consumed cells are ignored when finding the chain tail", () => {
+    // Real tail is at row 0 (no bottom bias), but a consumed ghost sits at row 3.
+    const ghostId = 99; // arbitrary ID outside the active chain
+    const cells: Cell[] = [
+      { ...cell(ghostId, 3, 3, 2), consumedBy: 1 }, // ghost at bottom row – should be ignored
+      cell(1, 0, 0, 128),
+      cell(2, 1, 0, 64),
+    ];
+    const bias = computeDirectionBias(cells);
+    // Chain tail is at (1,0) – row 0 – so default Up bias should apply.
+    expect(bias[0]).toBe(DIRECTION_BIAS); // Up
+    expect(bias[1]).toBe(0);              // not Down
   });
 });
