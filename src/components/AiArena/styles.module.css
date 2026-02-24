@@ -1,0 +1,244 @@
+.arena {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 12px;
+  box-sizing: border-box;
+  background-color: #f9f8ee;
+  color: #786e65;
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  gap: 12px;
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────── */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 900px;
+  background: #eee4da;
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+}
+
+.controlGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.controlLabel {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.workerBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workerBtn {
+  width: 28px;
+  height: 28px;
+  border: 2px solid #baada0;
+  border-radius: 5px;
+  background: #fff;
+  color: #786e65;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  padding: 0;
+}
+
+.workerBtn:hover {
+  border-color: #f49463;
+}
+
+.workerBtnActive {
+  background: #f49463;
+  border-color: #f49463;
+  color: #fff;
+}
+
+.actionBtn {
+  padding: 5px 12px;
+  border: 2px solid #baada0;
+  border-radius: 7px;
+  background: #fff;
+  color: #786e65;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.actionBtn:hover {
+  border-color: #f49463;
+  color: #f49463;
+}
+
+.actionBtnActive {
+  background: #e0c870;
+  border-color: #e0c870;
+  color: #fff;
+}
+
+/* ── Game grid ─────────────────────────────────────────────────────────────── */
+
+.gamesGrid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), 1fr);
+  gap: 10px;
+  width: 100%;
+  max-width: 900px;
+}
+
+/* ── Individual game slot ──────────────────────────────────────────────────── */
+
+.slot {
+  background: #eee4da;
+  border-radius: 8px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: opacity 0.3s;
+}
+
+.slotGameOver {
+  opacity: 0.55;
+}
+
+.slotHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.slotId {
+  color: #baada0;
+  min-width: 22px;
+}
+
+.slotScore {
+  flex: 1;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  color: #786e65;
+}
+
+.slotStatus {
+  font-size: 10px;
+  color: #f67b5e;
+  white-space: nowrap;
+}
+
+.slotGrid {
+  /* Override grid cell size for compact display */
+  --cell-size: min(12vw, 80px);
+  --gap-s: min(0.8vw, 4px);
+  font-size: min(8vw, 22px);
+}
+
+/* ── Leaderboard ───────────────────────────────────────────────────────────── */
+
+.leaderboard {
+  width: 100%;
+  max-width: 900px;
+  background: #eee4da;
+  border-radius: 10px;
+  padding: 12px 16px;
+  box-sizing: border-box;
+}
+
+.leaderboardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.clearBtn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid #baada0;
+  border-radius: 5px;
+  background: transparent;
+  color: #786e65;
+  cursor: pointer;
+}
+
+.clearBtn:hover {
+  color: #f67b5e;
+  border-color: #f67b5e;
+}
+
+.leaderboardEmpty {
+  font-size: 13px;
+  color: #baada0;
+  text-align: center;
+  margin: 0;
+  padding: 8px 0;
+}
+
+.leaderboardList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.leaderboardEntry {
+  display: grid;
+  grid-template-columns: 28px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.rank {
+  font-weight: 700;
+  color: #e0c870;
+  text-align: center;
+}
+
+.entryName {
+  font-weight: 600;
+  color: #786e65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entryScore {
+  font-weight: 700;
+  color: #f49463;
+  white-space: nowrap;
+}
+
+.entryDate {
+  font-size: 11px;
+  color: #baada0;
+  white-space: nowrap;
+}

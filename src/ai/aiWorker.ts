@@ -36,8 +36,8 @@ export type WorkerInMessage =
   | { type: "SELECT_ACTION"; cells: Cell[] }
   | { type: "REMEMBER"; experience: Experience }
   | { type: "TRAIN_STEP" }
-  | { type: "SAVE_MODEL" }
-  | { type: "LOAD_MODEL" };
+  | { type: "SAVE_MODEL"; key?: string }
+  | { type: "LOAD_MODEL"; key?: string };
 
 export type WorkerOutMessage =
   | { type: "READY" }
@@ -89,13 +89,13 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
 
       case "SAVE_MODEL":
         if (!agent) throw new Error("Agent not initialised");
-        await agent.saveModel();
+        await agent.saveModel(msg.key);
         self.postMessage({ type: "SAVE_DONE" } satisfies WorkerOutMessage);
         break;
 
       case "LOAD_MODEL":
         if (!agent) throw new Error("Agent not initialised");
-        await agent.loadModel();
+        await agent.loadModel(msg.key);
         self.postMessage({ type: "LOAD_DONE" } satisfies WorkerOutMessage);
         break;
 
