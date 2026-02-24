@@ -1,8 +1,7 @@
 .gameMenu {
-  color: #786e65;
-  background-color: #eee4da;
+  color: #c8b8ac;
+  background-color: #2c251d;
   border-radius: min(3vw, 16px);
-  filter: invert(0.15);
   display: grid;
   grid-template-columns: 1fr 1fr;
   width: 100%;

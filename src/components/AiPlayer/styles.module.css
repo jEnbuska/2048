@@ -2,8 +2,7 @@
   border: none;
   background: none;
   grid-column: 1 / span 2;
-  filter: invert(0.15);
-  color: #786e65;
+  color: #c8b8ac;
   font-size: min(35px, 8vw);
   display: flex;
   align-items: center;
@@ -17,7 +16,7 @@
 }
 
 .aiPlayer:hover:not(:disabled) {
-  color: #302b27;
+  color: #e8ddd5;
 }
 
 .aiPlayer:disabled {

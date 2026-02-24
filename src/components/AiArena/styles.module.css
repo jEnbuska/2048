@@ -5,8 +5,8 @@
   min-height: 100vh;
   padding: 12px;
   box-sizing: border-box;
-  background-color: #f9f8ee;
-  color: #786e65;
+  background-color: #1c1813;
+  color: #c8b8ac;
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   gap: 12px;
 }
@@ -21,7 +21,7 @@
   justify-content: center;
   width: 100%;
   max-width: 900px;
-  background: #eee4da;
+  background: #2c251d;
   border-radius: 10px;
   padding: 10px 14px;
   box-sizing: border-box;
@@ -49,10 +49,10 @@
 .workerBtn {
   width: 28px;
   height: 28px;
-  border: 2px solid #baada0;
+  border: 2px solid #4d4438;
   border-radius: 5px;
-  background: #fff;
-  color: #786e65;
+  background: #1c1813;
+  color: #c8b8ac;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -72,10 +72,10 @@
 
 .actionBtn {
   padding: 5px 12px;
-  border: 2px solid #baada0;
+  border: 2px solid #4d4438;
   border-radius: 7px;
-  background: #fff;
-  color: #786e65;
+  background: #1c1813;
+  color: #c8b8ac;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -107,7 +107,7 @@
 /* ── Individual game slot ──────────────────────────────────────────────────── */
 
 .slot {
-  background: #eee4da;
+  background: #2c251d;
   border-radius: 8px;
   padding: 6px;
   display: flex;
@@ -129,7 +129,7 @@
 }
 
 .slotId {
-  color: #baada0;
+  color: #6a5e54;
   min-width: 22px;
 }
 
@@ -138,7 +138,7 @@
   text-align: right;
   font-size: 13px;
   font-weight: 700;
-  color: #786e65;
+  color: #c8b8ac;
 }
 
 .slotStatus {
@@ -159,7 +159,7 @@
 .leaderboard {
   width: 100%;
   max-width: 900px;
-  background: #eee4da;
+  background: #2c251d;
   border-radius: 10px;
   padding: 12px 16px;
   box-sizing: border-box;
@@ -177,10 +177,10 @@
 .clearBtn {
   font-size: 12px;
   padding: 3px 10px;
-  border: 1px solid #baada0;
+  border: 1px solid #4d4438;
   border-radius: 5px;
   background: transparent;
-  color: #786e65;
+  color: #c8b8ac;
   cursor: pointer;
 }
 
@@ -191,7 +191,7 @@
 
 .leaderboardEmpty {
   font-size: 13px;
-  color: #baada0;
+  color: #6a5e54;
   text-align: center;
   margin: 0;
   padding: 8px 0;
@@ -214,7 +214,7 @@
   font-size: 13px;
   padding: 4px 6px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .rank {
@@ -225,7 +225,7 @@
 
 .entryName {
   font-weight: 600;
-  color: #786e65;
+  color: #c8b8ac;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -239,6 +239,6 @@
 
 .entryDate {
   font-size: 11px;
-  color: #baada0;
+  color: #6a5e54;
   white-space: nowrap;
 }
