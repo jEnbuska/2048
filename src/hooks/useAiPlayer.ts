@@ -132,7 +132,6 @@ export default function useAiPlayer(
         case "ERROR":
           if (loadingModelRef.current) {
             // No saved model found – this is expected on first run
-            console.warn("[AI Worker] No saved model found, starting fresh:", msg.message);
             loadingModelRef.current = false;
           } else {
             console.error("[AI Worker]", msg.message);

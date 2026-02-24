@@ -296,7 +296,6 @@ export class DQNAgent {
   syncTargetNetwork(): void {
     const pWeights = this.policy.getWeights();
     this.target.setWeights(pWeights);
-    pWeights.forEach((w) => w.dispose());
   }
 
   // ── Persistence ──────────────────────────────────────────────────────────
